@@ -18,6 +18,7 @@ import type {
   NewsItem,
   OffseasonState,
   PostseasonSummary,
+  RosterRow,
   ScheduleEntry,
 } from '../sim/api.ts'
 import { useStore } from '../store.tsx'
@@ -159,6 +160,7 @@ export function Home() {
   const [post, setPost] = useState<PostseasonSummary | null>(null)
   const [race, setRace] = useState<AwardRace | null>(null)
   const [brief, setBrief] = useState<LeaderRow[][]>([])
+  const [squad, setSquad] = useState<RosterRow[]>([])
 
   const state = snapshot?.state
   const me = state?.userTeamId
@@ -170,6 +172,19 @@ export function Home() {
     client
       .schedule(me)
       .then((s) => live && setGames(s))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [client, me, snapshot])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `snapshot` is the refetch trigger, not a read
+  useEffect(() => {
+    if (!me) return
+    let live = true
+    client
+      .roster(me)
+      .then((rows) => live && setSquad(rows))
       .catch(() => undefined)
     return () => {
       live = false
@@ -206,6 +221,10 @@ export function Home() {
   const played = useMemo(() => games.filter((g) => g.result !== null), [games])
   const recent = useMemo(() => played.slice(-5).reverse(), [played])
   const lastGame = recent[0] ?? null
+  const squadRanked = useMemo(
+    () => [...squad].sort((a, b) => b.card.overall - a.card.overall),
+    [squad],
+  )
 
   useEffect(() => {
     if (!lastGame) {
@@ -676,8 +695,51 @@ export function Home() {
         </Panel>
       </div>
 
-      {/* ── The sidebar: the league, not you ─────────────────────────────── */}
+      {/* ── The sidebar: your men first, then the league ─────────────────── */}
       <div>
+        <Panel
+          title="Your squad"
+          actions={
+            <button type="button" className="ghost" onClick={() => setScreen('roster')}>
+              Full roster
+            </button>
+          }
+          flush
+        >
+          {squadRanked.length === 0 ? (
+            <p className="dim" style={{ margin: 0, padding: '8px 10px' }}>
+              Roster is loading.
+            </p>
+          ) : (
+            <table className="grid">
+              <tbody>
+                {squadRanked.map((r) => (
+                  <tr
+                    key={r.player.playerId}
+                    className="clickable"
+                    onClick={() => openCareer(r.player.playerId)}
+                  >
+                    <td className="text dim">{r.player.pos}</td>
+                    <td className="text">
+                      <button
+                        type="button"
+                        className="lg-link"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openCareer(r.player.playerId)
+                        }}
+                      >
+                        {r.player.name}
+                      </button>
+                    </td>
+                    <td className="num">{r.card.overall}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Panel>
+
         <Panel
           title="MVP race"
           actions={

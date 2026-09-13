@@ -523,6 +523,40 @@ test('the All-Star break is in February', { skip }, () => {
   )
 })
 
+test('simToDate stops for All-Star weekend and again when the regular season ends', {
+  skip,
+}, () => {
+  const d = start(3)
+  let allStar: NonNullable<ReturnType<typeof d.simToDate>[number]['interrupt']> | undefined
+  for (let i = 0; i < 80 && !allStar; i++) {
+    const reports = d.simToDate('2004-04-30')
+    const hit = reports.at(-1)?.interrupt
+    if (hit?.kind === 'allstar') allStar = hit
+    if (reports.length === 0) break
+  }
+  assert.equal(allStar?.kind, 'allstar')
+  if (allStar?.kind !== 'allstar') return
+  const weekend = d.allStars()
+  assert.ok(weekend?.played && weekend.result, 'the exhibition is on the save, not played lazily')
+  assert.equal(weekend.date, allStar.date)
+  assert.equal(weekend.result?.eastPts, allStar.eastPts)
+  assert.equal(d.getState().seasonComplete, false)
+
+  let wrap: NonNullable<ReturnType<typeof d.simToDate>[number]['interrupt']> | undefined
+  for (let i = 0; i < 80 && !wrap; i++) {
+    const reports = d.simToDate('2004-07-01')
+    const hit = reports.at(-1)?.interrupt
+    if (hit?.kind === 'season') wrap = hit
+    if (d.getState().seasonComplete) break
+    if (reports.length === 0) break
+  }
+  assert.equal(wrap?.kind, 'season')
+  if (wrap?.kind !== 'season') return
+  assert.equal(wrap.yearEnd, 2004)
+  assert.ok(wrap.mvpName)
+  assert.ok(d.allStars()?.played)
+})
+
 test('the schedule carries the playoffs', { skip }, () => {
   const d = start(5)
   const regular = d.schedule(SAS()).length

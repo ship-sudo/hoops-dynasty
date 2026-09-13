@@ -114,7 +114,7 @@ export function eraContextFrom(
     zonePct: zones
       ? { ...zones.pct }
       : { rim: k * r.rim, close: k * r.close, mid: k * r.mid, three: fg3m / fg3a },
-    homeWinPct: homeAway.games > 0 ? homeAway.homeWins / homeAway.games : Number.NaN,
+    homeWinPct: homeAway.games > 0 ? homeAway.homeWins / homeAway.games : 0.6,
     handCheckBanned: flags?.handCheckBanned ?? yearEnd >= 2005,
     zoneLegal: flags?.zoneLegal ?? yearEnd >= 2002,
   }

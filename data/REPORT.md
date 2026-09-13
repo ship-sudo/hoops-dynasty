@@ -1,6 +1,6 @@
 # Data pipeline report
 
-Generated 2026-09-13T01:44:48.931Z from data/db.sqlite. Source: stats.nba.com cache (Lane A).
+Generated 2026-09-13T04:11:31.965Z from data/db.sqlite. Source: stats.nba.com cache (Lane A).
 b-ref-derived tables (salaries, contracts, awards, shooting, id_map) and era rules fill in when Lanes B and C merge.
 
 ## Row counts per season
@@ -36,6 +36,7 @@ b-ref-derived tables (salaries, contracts, awards, shooting, id_map) and era rul
 | 2023-24 | 82 | 30 | 871 | 1318 | 28086 | 15 | 532 | 238 | 439 | 439 | 67 | 0 |
 | 2024-25 | 82 | 30 | 875 | 1320 | 28110 | 15 | 534 | 263 | 424 | 424 | 67 | 0 |
 | 2025-26 | 82 | 30 | 891 | 1321 | 28572 | 15 | 530 | 283 | 476 | 476 | 28 | 0 |
+| 2026-27 | 0 | 30 | 587 | 0 | 0 | 0 | 587 | 293 | 470 | 470 | 0 | 0 |
 
 ## Once-only tables
 
@@ -90,8 +91,9 @@ b-ref-derived tables (salaries, contracts, awards, shooting, id_map) and era rul
 | all | games | play-in team logs are empty before 2019-20 because the play-in did not exist (not a gap) |
 | all | injuries | no free bulk source proven |
 | all | player_seasons | per100_json, advanced_json, shooting_json and pbp_json are season-level lines copied onto every stint |
+| all | player_seasons | 587 NBA player-seasons have no bref row (unmatched id or missing from the dataset): gs, shooting_json, pbp_json stay null |
 | all | players | from_year/to_year come from commonallplayers (career span, not just 1998+) |
-| all | players | 266 players with games but no birth date (never on a season-end roster); bundle age falls back to the leaguedash bio age |
+| all | players | 265 players with games but no birth date (never on a season-end roster); bundle age falls back to the leaguedash bio age |
 | all | salaries | 913 salary rows dropped: no NBA id (bref CSV has names only; see open/COVERAGE.md) |
 | all | salaries | 490 duplicate player-season salary rows collapsed to the larger amount |
 | all | salaries | 2020-21 onward lists standard contracts only (two-way, Exhibit 10, 10-day absent) |
@@ -123,9 +125,14 @@ b-ref-derived tables (salaries, contracts, awards, shooting, id_map) and era rul
 | 2023-24 | bundle | 17 first-stint players beyond the 20-man opening-night cap dropped from the bundle |
 | 2024-25 | bundle | 13 first-stint players beyond the 20-man opening-night cap dropped from the bundle |
 | 2024-25, 2025-26 | games | 5 neutral-site games (both logs '@'): lower team id set as nominal home |
-| 2025-26 | awards | no MVP/ROY/DPOY/All-NBA rows: the source dataset stops before this season |
+| 2025-26, 2026-27 | awards | no MVP/ROY/DPOY/All-NBA rows: the source dataset stops before this season |
 | 2025-26 | bundle | 22 first-stint players beyond the 20-man opening-night cap dropped from the bundle |
 | 2025-26 | coaches | 3 teams without a head coach row |
+| 2026-27 | bundle | 20 first-stint players beyond the 20-man opening-night cap dropped from the bundle |
+| 2026-27 | contracts | 5 current-page rows dropped: no NBA id (bref map or roster name) |
+| 2026-27 | contracts | preseason 2027: salaries from the current contracts page (y1=2026-27) |
+| 2026-27 | player_seasons | preseason: no game logs; 587 empty stints from the current roster |
+| 2026-27 | team_seasons | preseason: no standings; 30 clubs copied from 2026 (0-0, last year's box as the era prior) |
 
 ## Spot checks
 

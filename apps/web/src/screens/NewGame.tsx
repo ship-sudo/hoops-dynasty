@@ -52,7 +52,7 @@ const previewColumns: Column<RosterRow>[] = [
 
 export function NewGame() {
   const { client, startGame, resume, hasAutosave, busy } = useStore()
-  const [yearEnd, setYearEnd] = useState<number>(SEASONS[0] ?? 2026)
+  const [yearEnd, setYearEnd] = useState<number>(SEASONS[0] ?? 2027)
   const [teams, setTeams] = useState<TeamRecord[]>([])
   const [teamId, setTeamId] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ roster: RosterRow[]; finance: TeamFinance } | null>(null)

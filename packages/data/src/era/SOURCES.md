@@ -8,7 +8,7 @@ cached page `data/raw/bref/salary-cap-history.html` (fetched by another lane).
 
 ## Cap
 
-- Cached basketball-reference page `data/raw/bref/salary-cap-history.html` (table `salary_cap_history`), every season 1997-98 → 2025-26. The test parses this table.
+- Cached basketball-reference page `data/raw/bref/salary-cap-history.html` (table `salary_cap_history`), every season 1997-98 → 2025-26. The test parses this table. 2026-27 is not on that page; the cap is from the NBA release below.
 - Cross-checks: cbafaq salarycap99/05/11/17 cap tables; pr.nba.com press releases 2012-13 → 2018-19, 2022-23, 2025-26; HoopsRumors 2023-24, 2024-25. All agree.
 
 ## Tax line, aprons
@@ -20,6 +20,7 @@ cached page `data/raw/bref/salary-cap-history.html` (fetched by another lane).
 - 2017-18 → 2022-23: http://www.cbafaq.com/salarycap17.htm "Tax Level | Apron" table.
 - 2012-13 → 2018-19, 2022-23, 2025-26: https://pr.nba.com/nba-salary-cap-2012-13-season (and the same pattern per season). The 2025-26 release lists tax, first and second apron.
 - 2023-24, 2024-25: https://www.hoopsrumors.com/2023/06/salary-cap-tax-line-set-for-2023-24-nba-season.html and https://www.hoopsrumors.com/2024/06/salary-cap-tax-line-set-for-2024-25-nba-season.html.
+- 2026-27: https://www.nba.com/news/nba-salary-cap-2026-27-season (cap $164.961M, tax $200.428M, first apron $209.015M, second apron $221.686M, MLEs). Cross-check https://www.hoopsrumors.com/2026/06/salary-cap-tax-line-set-for-2026-27-nba-season.html (same figures, plus maxes, BAE $5,477,000).
 
 ## Minimum salaries
 
@@ -30,11 +31,12 @@ cached page `data/raw/bref/salary-cap-history.html` (fetched by another lane).
 - 2017-18 → 2019-20: http://www.cbafaq.com/minimums.htm, cross-checked with HoopsRumors 2018/19 and 2019/20 posts.
 - 2020-21: derived (see Unverified).
 - 2021-22 → 2025-26: https://www.hoopsrumors.com/2021/08/nba-minimum-salaries-for-2021-22.html, .../2022/07/...-2022-23.html, .../2023/07/...-2023-24.html, .../2024/06/...-2024-25.html, .../2025/06/...-2025-26.html. 2022-23 also in cbafaq salarycap17.htm.
+- 2026-27: https://www.hoopsrumors.com/2026/07/nba-minimum-salaries-for-2026-27.html ($1,357,763 / $3,876,529).
 
 ## Maximum salaries
 
 - No individual max before the 1999 CBA: cbafaq salarycap99.htm CBA history table ("1999 … Added maximum salaries"); https://en.wikipedia.org/wiki/1998–99_NBA_lockout.
-- 25/30/35% and dollar values: cbafaq salarycap99.htm (1998-99 → 2004-05), salarycap05.htm (2005-06 → 2010-11), salarycap11.htm (2011-12 → 2016-17), salarycap17.htm (2017-18 → 2022-23); HoopsRumors cap posts for 2023-24 and 2024-25; https://www.hoopsrumors.com/2025/06/nba-maximum-salaries-for-2025-26.html.
+- 25/30/35% and dollar values: cbafaq salarycap99.htm (1998-99 → 2004-05), salarycap05.htm (2005-06 → 2010-11), salarycap11.htm (2011-12 → 2016-17), salarycap17.htm (2017-18 → 2022-23); HoopsRumors cap posts for 2023-24 and 2024-25; https://www.hoopsrumors.com/2025/06/nba-maximum-salaries-for-2025-26.html; 2026-27 maxes on the HoopsRumors cap post above.
 - Note: 2005 and 2011 CBAs computed the max from a lower BRI share, so the dollar figures are below a literal 25/30/35% of cap (cbafaq salarycap11.htm note).
 
 ## Rookie scale (#1 pick, 100%)
@@ -42,6 +44,7 @@ cached page `data/raw/bref/salary-cap-history.html` (fetched by another lane).
 - 1998 → 2004 drafts: http://www.cbafaq.com/scale99.htm (pick 1 rows). The page's Olowokandi example shows $3,125,160 for 1998-99; that is a digit transposition of 120% × $2,679,300 = $3,215,160 (its later years match the table).
 - 2005 → 2010 drafts: cbafaq salarycap05.htm rookie table. 2011 → 2016: salarycap11.htm. 2017 → 2019: http://www.cbafaq.com/scale17.htm.
 - 1997 draft and 2019 → 2026 drafts: https://www.salaryswish.com/rookie-scale/<season end year> (1998, 2020–2027). Cross-checked against cbafaq for 1999, 2006, 2012, 2018, 2019: all match.
+- 2027 draft #1 (100%): cap-scaled from 2026 ($12,290,000 × 164,961,000 / 154,647,000). Unverified. 2026 first-round 120% figures: https://www.hoopsrumors.com/2026/07/rookie-scale-salaries-for-2026-nba-first-round-picks.html.
 
 ## Exceptions (MLE, taxpayer MLE, room MLE, BAE)
 
@@ -126,3 +129,5 @@ Field names listed in each season's `unverified`, with the value used.
 - 2003 `tax_line`: 52,880,000 and 2004 `tax_line`: 54,560,000 — rounded figures only.
 - 2021 `min_salary_0yr` 898,310 and `min_salary_10yr` 2,564,753: the 2017 CBA scales minimums by the cap change and the cap was held flat, so 2019-20 values are reused; no page read lists 2020-21 directly.
 - 2026 `tax_rates`: bracket width 5,685,000 is the cap-scaled $5M bracket rounded to $1k (HoopsRumors quotes "approximately $5,685,000"); rates confirmed.
+- 2027 `tax_rates` bracket 6,064,000: same $5M bracket scaled by the 2026-27 cap vs 2023-24. Rates carried from 2025-26.
+- 2027 `rookie_scale_pick1`: see Rookie scale above.

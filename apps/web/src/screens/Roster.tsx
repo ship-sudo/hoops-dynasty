@@ -4,8 +4,9 @@ import type { PlayerMood, RosterRow, SquadMoodView, TeamFinance } from '../sim/a
 import { useStore } from '../store.tsx'
 import { Modal, Panel, RatingBar } from '../ui/bits.tsx'
 import { type Column, DataTable } from '../ui/DataTable.tsx'
-import { height, money, n1, pct0, pct1, per, plainDate, seasonLabel } from '../ui/format.ts'
+import { height, money, pct0, pct1, per, plainDate, seasonLabel } from '../ui/format.ts'
 import { PlayerCareer } from './Career.tsx'
+import { PlayerActions } from './PlayerActions.tsx'
 import './morale.css'
 
 /** The mood ramp is one class; the pill, the bar and the panel all read `--mr` off it. */
@@ -235,7 +236,9 @@ export function CapLine({ finance }: { finance: TeamFinance }) {
           ? `${money(overCap)} over the cap — allowed, because you can always re-sign your own men. `
           : `${money(-overCap)} of room under the cap. `}
         {hasTax && finance.payroll > finance.taxLine
-          ? 'Over the tax line, so the owner pays a penalty on every dollar above it.'
+          ? finance.taxBill > 0
+            ? `Over the tax line: ${money(finance.taxBill)} owed${finance.repeater ? ' at repeater rates' : ''}.`
+            : 'Over the tax line, so the owner pays a penalty on every dollar above it.'
           : hasTax
             ? 'Under the tax line, so no penalty.'
             : 'There was no luxury tax in this era.'}
@@ -255,7 +258,6 @@ function PlayerCard({
 }) {
   const p = row.player
   const t = row.totals
-  const real = p.real
   return (
     <Modal
       title={
@@ -292,7 +294,7 @@ function PlayerCard({
 
           <section>
             <div className="rowline" style={{ marginBottom: 5 }}>
-              <h3 style={{ margin: 0 }}>This season (simulated)</h3>
+              <h3 style={{ margin: 0 }}>This season</h3>
               <span style={{ flex: 1 }} />
               <button type="button" className="ghost" onClick={() => onCareer(p.playerId)}>
                 Full career ▸
@@ -333,48 +335,6 @@ function PlayerCard({
               </tbody>
             </table>
           </section>
-
-          {real ? (
-            <section>
-              <h3 style={{ marginBottom: 5 }}>What really happened</h3>
-              <table className="grid">
-                <thead>
-                  <tr>
-                    <th>GP</th>
-                    <th>GS</th>
-                    <th>MPG</th>
-                    <th>PPG</th>
-                    <th>RPG</th>
-                    <th>APG</th>
-                    <th title="True shooting: scoring efficiency counting threes and free throws">
-                      TS%
-                    </th>
-                    <th title="Usage: share of the team's possessions he finished">USG</th>
-                    <th title="Box plus/minus: points better than average per 100 possessions">
-                      BPM
-                    </th>
-                    <th title="Player efficiency rating. 15 is league average.">PER</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="num">{real.gp}</td>
-                    <td className="num">{real.gs}</td>
-                    <td className="num">{n1(p.realMpg)}</td>
-                    <td className="num">{per(real.totals.pts, real.gp)}</td>
-                    <td className="num">{per(real.totals.oreb + real.totals.dreb, real.gp)}</td>
-                    <td className="num">{per(real.totals.ast, real.gp)}</td>
-                    <td className="num">{real.pct.ts != null ? pct1(real.pct.ts) : '—'}</td>
-                    <td className="num">
-                      {real.adv.usg != null ? `${real.adv.usg.toFixed(1)}%` : '—'}
-                    </td>
-                    <td className="num">{real.adv.bpm != null ? n1(real.adv.bpm) : '—'}</td>
-                    <td className="num">{real.adv.per != null ? n1(real.adv.per) : '—'}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </section>
-          ) : null}
         </div>
 
         <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
@@ -471,6 +431,8 @@ function PlayerCard({
             ) : null}
           </Panel>
 
+          <PlayerActions playerId={p.playerId} onChanged={onClose} />
+
           <Panel title="Bio">
             <dl className="kv">
               <dt>Born</dt>
@@ -542,6 +504,13 @@ export function Roster() {
       live = false
     }
   }, [client, teamId, snapshot])
+
+  useEffect(() => {
+    setSelected((cur) => {
+      if (!cur) return cur
+      return rows.find((r) => r.player.playerId === cur.player.playerId) ?? null
+    })
+  }, [rows])
 
   const cols = useMemo(columns, [])
   const team = teamById.get(teamId)

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { makeRng } from '@hoops/core'
+import { allStarDate, isAllStarRestDay } from './allstar.ts'
 import { fixtureBundle } from './fixture.ts'
 import { newGame } from './newgame.ts'
 import { buildMatchups } from './schedule.ts'
@@ -87,6 +88,14 @@ test('the calendar never puts a team in two games on one day', () => {
     seen.set(g.date, day)
   }
   assert.equal(state.calendar.schedule.length, 1230)
+  const first = state.calendar.schedule[0]?.date
+  const last = state.calendar.schedule.at(-1)?.date
+  const asDate = first && last ? allStarDate(first, last) : null
+  assert.equal(asDate, '2020-02-15')
+  if (!asDate) return
+  for (const g of state.calendar.schedule) {
+    assert.ok(!isAllStarRestDay(g.date, asDate), `no regular-season game on ${g.date}`)
+  }
   // The schedule must be date ordered: simDay walks it with a cursor.
   for (let i = 1; i < state.calendar.schedule.length; i++) {
     assert.ok(

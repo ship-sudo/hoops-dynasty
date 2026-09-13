@@ -9,20 +9,23 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import type {
-  CareerArc,
-  Contract,
-  EraContext,
-  EraRules,
-  HistoryBundle,
-  PlayerRecord,
-  PlayerSeasonStats,
-  Position,
-  RealAward,
-  RealPlayoffSeries,
-  ScheduledGame,
-  SeasonBundle,
-  TeamRecord,
+import {
+  type CareerArc,
+  type Contract,
+  type EraContext,
+  type EraRules,
+  type HistoryBundle,
+  type PlayerRecord,
+  type PlayerSeasonStats,
+  type Position,
+  RATING_KEYS,
+  type Ratings,
+  type RealAward,
+  type RealPlayoffSeries,
+  type ScheduledGame,
+  type SeasonBundle,
+  type TeamRecord,
+  type Tendencies,
 } from '@hoops/core'
 import { type RateInput, rateSeason } from '@hoops/ratings'
 import { all, one } from '../db/db.ts'
@@ -382,6 +385,10 @@ export function readEra(db: DatabaseSync, yearEnd: number): EraContext {
       pts: tot.pts,
     })
   }
+  if (lines.length === 0 && yearEnd > 1998) {
+    const prev = readEra(db, yearEnd - 1)
+    return { ...prev, yearEnd }
+  }
   const ha = one<{ games: number; home_wins: number }>(
     db,
     `SELECT COUNT(*) AS games, SUM(home_pts > away_pts) AS home_wins FROM games
@@ -477,18 +484,79 @@ function seasonPlayers(
   return out
 }
 
-function rateAll(players: Iterable<SeasonPlayer>) {
+function rateAll(
+  players: Iterable<SeasonPlayer>,
+  prior: Map<string, SeasonPlayer> = new Map(),
+  older: Map<string, SeasonPlayer> = new Map(),
+) {
   const inputs: RateInput[] = []
-  for (const p of players)
+  const guessed = new Map<string, { ratings: Ratings; tendencies: Tendencies }>()
+  for (const p of players) {
+    const stats =
+      p.stats && p.stats.min > 0
+        ? p.stats
+        : (prior.get(p.row.player_id)?.stats ?? older.get(p.row.player_id)?.stats ?? null)
+    if (!stats || stats.min <= 0) {
+      guessed.set(p.row.player_id, guessRookie(p))
+      continue
+    }
     inputs.push({
       playerId: p.row.player_id,
       pos: p.pos,
       age: p.age,
       heightIn: p.heightIn,
       weightLb: p.weightLb,
-      stats: p.stats,
+      stats,
     })
-  return rateSeason(inputs)
+  }
+  const rated = rateSeason(inputs)
+  for (const [id, g] of guessed) rated.set(id, g)
+  return rated
+}
+
+function statsWithMinutes(stats: PlayerSeasonStats | null | undefined): PlayerSeasonStats | null {
+  return stats && stats.min > 0 ? stats : null
+}
+
+/** A pick-shaped prior when this board has no box score for him yet. #1 ≈ 64, late second ≈ 42. */
+function guessRookie(p: SeasonPlayer): { ratings: Ratings; tendencies: Tendencies } {
+  const pick = p.row.draft_pick
+  const slot = pick != null && pick > 0 ? pick : 45
+  const ovr = Math.max(40, Math.min(64, Math.round(64 - (slot - 1) * 0.55)))
+  const ratings = Object.fromEntries(RATING_KEYS.map((k) => [k, ovr])) as Ratings
+  return { ratings, tendencies: guessTendencies(p.pos) }
+}
+
+function guessTendencies(pos: Position): Tendencies {
+  if (pos === 'PG')
+    return {
+      usage: 0.22,
+      shotRim: 0.28,
+      shotClose: 0.12,
+      shotMid: 0.22,
+      shotThree: 0.38,
+      assist: 0.28,
+      postUp: 0.04,
+    }
+  if (pos === 'C' || pos === 'PF')
+    return {
+      usage: 0.16,
+      shotRim: 0.42,
+      shotClose: 0.22,
+      shotMid: 0.18,
+      shotThree: 0.18,
+      assist: 0.1,
+      postUp: 0.22,
+    }
+  return {
+    usage: 0.18,
+    shotRim: 0.3,
+    shotClose: 0.14,
+    shotMid: 0.22,
+    shotThree: 0.34,
+    assist: 0.14,
+    postUp: 0.08,
+  }
 }
 
 /** Contracts as of opening night, by player. Wayback rows are real; earlier seasons are inferred. */
@@ -601,12 +669,29 @@ export function buildSeasonBundle(
   const chosen = on.entries
     .map((e) => ({ e, p: people.get(e.playerId) as SeasonPlayer }))
     .filter((x) => x.p !== undefined)
-  const rated = rateAll(chosen.map((x) => x.p))
+  const prior =
+    yearEnd > firstLoaded
+      ? seasonPlayers(db, yearEnd - 1, openingDateOf(db, yearEnd - 1))
+      : new Map<string, SeasonPlayer>()
+  const older =
+    yearEnd - 1 > firstLoaded
+      ? seasonPlayers(db, yearEnd - 2, openingDateOf(db, yearEnd - 2))
+      : new Map<string, SeasonPlayer>()
+  const rated = rateAll(
+    chosen.map((x) => x.p),
+    prior,
+    older,
+  )
   const contracts = contractsFor(db, yearEnd)
   const players: PlayerRecord[] = chosen.map(({ e, p }) => {
     const r = rated.get(p.row.player_id)
     if (!r) throw new Error(`no rating for ${p.row.player_id}`)
     const row = p.row
+    const last =
+      statsWithMinutes(p.stats) ??
+      statsWithMinutes(prior.get(row.player_id)?.stats) ??
+      statsWithMinutes(older.get(row.player_id)?.stats)
+    const mpg = last && last.gp > 0 ? last.min / last.gp : 0
     return {
       playerId: row.player_id,
       brefId: row.bref_id,
@@ -630,7 +715,7 @@ export function buildSeasonBundle(
       ratings: r.ratings,
       tendencies: r.tendencies,
       real: p.stats,
-      realMpg: p.stats && p.stats.gp > 0 ? p.stats.min / p.stats.gp : 0,
+      realMpg: mpg,
     }
   })
   const schedule: ScheduledGame[] = all<GameRow>(

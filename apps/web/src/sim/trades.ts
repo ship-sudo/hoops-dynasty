@@ -126,6 +126,12 @@ export function applyTrade(state: GameState, user: TradePackage, other: TradePac
   }
   move(user, other.teamId)
   move(other, user.teamId)
+  if (state.listed?.length) {
+    const mine = new Set(
+      state.league.players.filter((p) => p.teamId === state.userTeamId).map((p) => p.playerId),
+    )
+    state.listed = state.listed.filter((id) => mine.has(id))
+  }
 }
 
 /** A block row plus the number a trade is actually scored on. */
@@ -257,12 +263,21 @@ export function incomingOffers(
   potentials: Potentials,
   rng: Rng,
   limit = 6,
+  forPlayerId?: string,
 ): { other: TradePackage; user: TradePackage; assessment: TradeAssessment }[] {
   const userTeamId = state.userTeamId
   const mine = pricedBlock(state, userTeamId, potentials)
   const out: { other: TradePackage; user: TradePackage; assessment: TradeAssessment }[] = []
   if (mine.length === 0) return out
+  const listed = (state.listed ?? []).filter((id) => mine.some((p) => p.playerId === id))
+  const hunt = forPlayerId
+    ? mine.filter((p) => p.playerId === forPlayerId)
+    : listed.length > 0
+      ? mine.filter((p) => listed.includes(p.playerId))
+      : mine
+  if (hunt.length === 0) return out
   const seen = new Set<string>()
+  const swings = forPlayerId || listed.length > 0 ? 5 : 3
 
   for (const team of state.league.teams) {
     if (team.teamId === userTeamId) continue
@@ -271,11 +286,14 @@ export function incomingOffers(
     const theirPicks = picksOf(state, team.teamId)
     const myPicks = picksOf(state, userTeamId)
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      // One swing at somebody you would hate to lose, then two at anyone on the roster. The old
-      // version only ever asked about your top six, so the board never changed.
+    for (let attempt = 0; attempt < swings; attempt++) {
+      // Listed men are the ones you put on the block; otherwise one swing at a star, then anyone.
       const want =
-        attempt === 0 ? mine[rng.int(Math.min(3, mine.length))] : mine[rng.int(mine.length)]
+        hunt.length < mine.length || forPlayerId
+          ? hunt[rng.int(hunt.length)]
+          : attempt === 0
+            ? mine[rng.int(Math.min(3, mine.length))]
+            : mine[rng.int(mine.length)]
       if (!want) continue
       const candidates = theirs.filter(
         (p) => Math.abs(p.salary - want.salary) < want.salary * 0.4 + 2_000_000,

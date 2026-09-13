@@ -65,14 +65,31 @@ export interface PlayedGame {
 export const NEWSWORTHY_GAMES = 5
 
 /** Why a multi-day sim stopped. Ephemeral: lives on DayResult / DayReport, not the save. */
-export interface SimInterrupt {
-  kind: 'injury'
-  playerId: string
-  name: string
-  games: number
-  injuryName: string
-  teamId: string
-}
+export type SimInterrupt =
+  | {
+      kind: 'injury'
+      playerId: string
+      name: string
+      games: number
+      injuryName: string
+      teamId: string
+    }
+  | {
+      kind: 'allstar'
+      date: string
+      yearEnd: number
+      eastPts: number
+      westPts: number
+      mvpName: string | null
+      yours: string[]
+    }
+  | {
+      kind: 'season'
+      yearEnd: number
+      mvpName: string | null
+      userWins: number
+      userLosses: number
+    }
 
 const pendingInterrupt = new WeakMap<GameState, SimInterrupt>()
 
@@ -81,6 +98,10 @@ export function takeSimInterrupt(state: GameState): SimInterrupt | null {
   const hit = pendingInterrupt.get(state) ?? null
   pendingInterrupt.delete(state)
   return hit
+}
+
+export function setSimInterrupt(state: GameState, hit: SimInterrupt): void {
+  pendingInterrupt.set(state, hit)
 }
 
 function rememberUserInjury(
@@ -106,6 +127,7 @@ function rememberUserInjury(
     teamId: p.teamId,
   }
   const prev = pendingInterrupt.get(state)
+  if (prev && prev.kind !== 'injury') return
   if (!prev || hit.games > prev.games) pendingInterrupt.set(state, hit)
 }
 

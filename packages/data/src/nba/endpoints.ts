@@ -15,7 +15,7 @@ export type MeasureType = 'Base' | 'Advanced'
 export type PerMode = 'Totals' | 'PerGame' | 'Per100Possessions'
 
 export const FIRST_SEASON = 1998
-export const LAST_SEASON = 2026
+export const LAST_SEASON = 2027
 
 /** Named result set, or the first one if the name is missing. */
 export function resultRows(res: NbaResponse, name: string): Row[] {
@@ -145,8 +145,12 @@ export async function fetchAllPlayers(): Promise<Row[]> {
   return resultRows(res, 'CommonAllPlayers')
 }
 
-/** Team ids present in a season's leaguedashteamstats. 29 through 2004, 30 after. */
+/** Team ids present in a season's leaguedashteamstats. 29 through 2004, 30 after.
+ *  A season that has not tipped yet returns 0 rows; fall back to last year's clubs. */
 export async function fetchTeamIds(yearEnd: number): Promise<number[]> {
   const rows = await fetchTeamTotals(yearEnd)
-  return rows.map((r) => Number(r.TEAM_ID)).filter((n) => Number.isFinite(n))
+  const ids = rows.map((r) => Number(r.TEAM_ID)).filter((n) => Number.isFinite(n))
+  if (ids.length > 0) return ids
+  if (yearEnd > FIRST_SEASON) return fetchTeamIds(yearEnd - 1)
+  return []
 }

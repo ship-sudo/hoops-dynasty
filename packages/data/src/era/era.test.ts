@@ -34,14 +34,16 @@ test('cap matches the cached basketball-reference table for every season', {
 }, () => {
   const caps = parseBrefCaps(readFileSync(brefPath, 'utf8'))
   for (const s of seasons) {
-    assert.equal(s.cap, caps.get(s.season_end), `cap ${s.season_id}`)
+    const want = caps.get(s.season_end)
+    if (want === undefined) continue
+    assert.equal(s.cap, want, `cap ${s.season_id}`)
   }
 })
 
-test('29 seasons, 1998 through 2026, ids match keys', () => {
-  assert.equal(seasons.length, 29)
+test('30 seasons, 1998 through 2027, ids match keys', () => {
+  assert.equal(seasons.length, 30)
   assert.equal(ERA_FIRST, 1998)
-  assert.equal(ERA_LAST, 2026)
+  assert.equal(ERA_LAST, 2027)
   assert.deepEqual(
     years,
     seasons.map((s) => s.season_end),
@@ -51,6 +53,17 @@ test('29 seasons, 1998 through 2026, ids match keys', () => {
     assert.equal(ERA[y], s)
     assert.equal(s.season_id, `${y - 1}-${String(y % 100).padStart(2, '0')}`)
   }
+})
+
+test("2026-27 money is the NBA's June 2026 release", () => {
+  const s = ERA[2027]
+  assert.ok(s)
+  assert.equal(s.cap, 164_961_000)
+  assert.equal(s.tax_line, 200_428_000)
+  assert.equal(s.apron_1, 209_015_000)
+  assert.equal(s.apron_2, 221_686_000)
+  assert.equal(s.min_salary_0yr, 1_357_763)
+  assert.equal(s.mle_non_taxpayer, 15_044_000)
 })
 
 test('tax line and aprons are ordered', () => {

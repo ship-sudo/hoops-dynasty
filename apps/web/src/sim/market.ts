@@ -15,8 +15,10 @@ import {
   contractFrom,
   type FaTeam,
   type FreeAgent,
+  isTaxRepeater,
   maxOfferFor,
   maxSalary,
+  minSalary,
   payroll,
   rookieContract,
   runFreeAgency,
@@ -141,6 +143,88 @@ export function askingFrom(
   return { amount: Math.round(base.amount * mult), years: base.years }
 }
 
+/** What he would take to stay, whether that is a re-sign or an extension. */
+export function askingToStay(
+  state: GameState,
+  p: LeaguePlayer,
+  potentials: Potentials,
+): { amount: number; years: number } {
+  const fa: FreeAgent = {
+    playerId: p.playerId,
+    name: p.name,
+    ratings: p.ratings,
+    age: p.age,
+    potential: potentials.get(p.playerId) ?? overall(p.ratings) + 3,
+    contract: null,
+    yearsOfService: p.yearsPro,
+    incumbentTeamId: p.teamId,
+    yearsWithIncumbent: p.yearsWithTeam,
+  }
+  return askingFrom(state, fa, state.userTeamId)
+}
+
+/**
+ * Add years onto a deal he already has. Bird rights cover it: you can always pay your own man.
+ * A free agent whose deal is up belongs in the summer market, not here.
+ */
+export function extendPlayer(
+  state: GameState,
+  playerId: string,
+  amount: number,
+  years: number,
+  potentials: Potentials,
+): { ok: boolean; message: string } {
+  const p = state.league.players.find((x) => x.playerId === playerId)
+  if (!p || p.teamId !== state.userTeamId)
+    return { ok: false, message: 'He is not yours to extend.' }
+  if (!p.contract) return { ok: false, message: 'He has no deal to extend. Bid in free agency.' }
+  if (wantsOut(moraleValue(state, playerId)))
+    return { ok: false, message: 'He will not re-sign here, whatever you offer.' }
+  const yearEnd = state.season.yearEnd
+  const remaining = p.contract.years.filter((y) => y.yearEnd >= yearEnd)
+  if (remaining.length === 0) return { ok: false, message: 'His deal is up. Bid in free agency.' }
+  const add = Math.max(1, Math.min(5, Math.round(years)))
+  if (remaining.length + add > 5)
+    return {
+      ok: false,
+      message: `A deal cannot run more than five years. He has ${remaining.length} left.`,
+    }
+  const rules = state.season.rules
+  const ask = askingToStay(state, p, potentials)
+  const max = maxSalary(rules, p.yearsPro)
+  const min = minSalary(rules, p.yearsPro)
+  const first = Math.min(max, Math.max(min, Math.round(amount)))
+  if (first + 1 < ask.amount * 0.9)
+    return { ok: false, message: `He wants about ${money(ask.amount)} to stay.` }
+  const last = Math.max(...p.contract.years.map((y) => y.yearEnd))
+  const extra = contractFrom(
+    {
+      teamId: p.teamId,
+      playerId: p.playerId,
+      amount: first,
+      years: add,
+      kind: 'standard',
+    },
+    last + 1,
+  )
+  p.contract = {
+    ...p.contract,
+    kind: 'standard',
+    source: 'generated',
+    years: [...p.contract.years, ...extra.years],
+  }
+  state.log.push({
+    date: state.calendar.date,
+    yearEnd,
+    kind: 'contract',
+    text: `Extended ${p.name} at ${money(first)} for ${add} more year${add === 1 ? '' : 's'}`,
+  })
+  return {
+    ok: true,
+    message: `Extended ${p.name} at ${money(first)} for ${add} more year${add === 1 ? '' : 's'}.`,
+  }
+}
+
 /** The club he is actually leaving, whatever the pool says about his Bird rights. */
 function hasPlayedFor(state: GameState, playerId: string, teamId: string): boolean {
   return state.league.players.some((p) => p.playerId === playerId && p.teamId === teamId)
@@ -178,21 +262,22 @@ export interface TaxBill {
   payroll: number
   taxLine: number
   bill: number
+  repeater: boolean
 }
 
 /**
  * Assess the luxury tax on the payroll every club has committed for `yearEnd`.
  *
- * `taxBill` had been sitting in `packages/frontoffice` unused by anything but its own test since it
- * was written, so a $93.2M payroll against an $84.7M line was simply never charged. It is assessed
- * here, at the close of the summer, because that is the first moment the coming season's payroll is
- * actually known — and the result is written into the league log, so a taxpayer reads about its
- * bill the way it reads about everything else.
+ * Repeater status comes from seasons this save actually billed, not from real-world history: a
+ * club that paid in three of the prior four (or all of the prior three, in 2014-15) is charged
+ * the surcharge. Old saves start with an empty ledger, so nobody is a repeater on night one.
  */
 export function seasonTaxBills(state: GameState, yearEnd: number): TaxBill[] {
   const rules = state.season.rules
   const line = rules.tax_line
   if (line == null) return []
+  const paid = state.taxPaid ?? {}
+  const rule = rules.tax_rates?.repeater_rule ?? null
   const out: TaxBill[] = []
   for (const t of state.league.teams) {
     const squad = state.league.players.filter((p) => p.teamId === t.teamId)
@@ -200,11 +285,23 @@ export function seasonTaxBills(state: GameState, yearEnd: number): TaxBill[] {
       squad.map((p) => ({ playerId: p.playerId, contract: p.contract })),
       yearEnd,
     )
-    const bill = taxBill(salaries, rules)
+    const repeater = isTaxRepeater(paid[t.teamId] ?? [], yearEnd, rule)
+    const bill = taxBill(salaries, rules, { repeater })
     if (bill <= 0) continue
-    out.push({ teamId: t.teamId, payroll: payroll(salaries), taxLine: line, bill })
+    out.push({ teamId: t.teamId, payroll: payroll(salaries), taxLine: line, bill, repeater })
   }
   return out.sort((a, b) => b.bill - a.bill)
+}
+
+/** Remember who paid this year, so next summer's repeater test has something to read. */
+export function recordTaxBills(state: GameState, yearEnd: number, bills: TaxBill[]): void {
+  if (bills.length === 0) return
+  const paid = { ...(state.taxPaid ?? {}) }
+  for (const b of bills) {
+    const years = paid[b.teamId] ?? []
+    if (!years.includes(yearEnd)) paid[b.teamId] = [...years, yearEnd]
+  }
+  state.taxPaid = paid
 }
 
 function apply(state: GameState, signing: Signing, yearEnd: number): void {
@@ -341,6 +438,7 @@ export function runMarket(
 
   // The books close on the summer: whoever is over the line is billed for it, in the log.
   const tax = seasonTaxBills(state, yearEnd)
+  recordTaxBills(state, yearEnd, tax)
   const nameOf = (teamId: string) => {
     const t = state.league.teams.find((x) => x.teamId === teamId)
     return t ? `${t.city} ${t.name}` : teamId
@@ -350,7 +448,7 @@ export function runMarket(
       date: state.calendar.date,
       yearEnd,
       kind: 'note',
-      text: `${nameOf(t.teamId)} owe ${money(t.bill)} in luxury tax on a ${money(t.payroll)} payroll (line ${money(t.taxLine)})`,
+      text: `${nameOf(t.teamId)} owe ${money(t.bill)} in luxury tax${t.repeater ? ' (repeater)' : ''} on a ${money(t.payroll)} payroll (line ${money(t.taxLine)})`,
     })
 
   return { signings, userSigned, rejected, tax }

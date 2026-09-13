@@ -111,6 +111,7 @@ test('a full regular season plays every scheduled game once, and standings add u
   assert.equal(w, l, 'every win is someone else’s loss')
   assert.equal(w, total)
   assert.ok(r.state.awards?.mvp, 'an MVP was picked')
+  assert.ok(r.state.allStar?.result, 'the All-Star game was played on the way')
   assert.ok(r.state.playoffs?.championTeamId, 'a champion was crowned')
 })
 

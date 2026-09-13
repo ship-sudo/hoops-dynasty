@@ -84,22 +84,42 @@ export interface ScheduleEntry {
 }
 
 /** Why a multi-day sim stopped. Ephemeral on the worker protocol, not the save. */
-export interface InjuryInterrupt {
-  kind: 'injury'
-  playerId: string
-  name: string
-  games: number
-  injuryName: string
-  teamId: string
-}
+export type SimInterrupt =
+  | {
+      kind: 'injury'
+      playerId: string
+      name: string
+      games: number
+      injuryName: string
+      teamId: string
+    }
+  | {
+      kind: 'allstar'
+      date: string
+      yearEnd: number
+      eastPts: number
+      westPts: number
+      mvpName: string | null
+      yours: string[]
+    }
+  | {
+      kind: 'season'
+      yearEnd: number
+      mvpName: string | null
+      userWins: number
+      userLosses: number
+    }
+
+/** @deprecated Use SimInterrupt. Kept so older call sites type-check during the rename. */
+export type InjuryInterrupt = Extract<SimInterrupt, { kind: 'injury' }>
 
 /** What one `continue` produces: the day that was played, its games, and the news it generated. */
 export interface DayReport {
   date: string
   games: PlayedGame[]
   news: NewsItem[]
-  /** Set when a user-team newsworthy injury ended a multi-day sim after this day. */
-  interrupt?: InjuryInterrupt
+  /** Set when a recap (injury, All-Star, end of the regular season) ended a multi-day sim. */
+  interrupt?: SimInterrupt
 }
 
 export interface SeasonTotals extends StatLine {
@@ -172,6 +192,10 @@ export interface TeamFinance {
   apron1: number | null
   apron2: number | null
   roster: number
+  /** Luxury tax owed on this payroll. 0 when under the line or the era has no tax. */
+  taxBill: number
+  /** True when this bill uses repeater rates. */
+  repeater: boolean
 }
 
 /** Opaque to the UI. The implementation owns the shape; the app just stores and restores it. */
@@ -223,7 +247,13 @@ export interface DynastyModule {
 // market — plus the record of what really happened, for comparison.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { NamedLineups, OffenseSystemId, PlayerInstruction, Position, Tactics } from '@hoops/core'
+import type {
+  NamedLineups,
+  OffenseSystemId,
+  PlayerInstruction,
+  Position,
+  Tactics,
+} from '@hoops/core'
 import type { RatingCard } from './card.ts'
 
 export type { RatingCard } from './card.ts'
@@ -291,6 +321,25 @@ export interface TradeBlockPlayer {
   surplus: number
   salary: number
   contractYears: number
+}
+
+/** One incoming trade for a listed man, plus whether you can bid on his next contract. */
+export interface PlayerDesk {
+  playerId: string
+  yours: boolean
+  listed: boolean
+  offers: { other: TradePackage; user: TradePackage; assessment: TradeAssessment }[]
+  /** Names for ids in those offers, so the card does not have to load every block. */
+  names: Record<string, string>
+  contract: {
+    kind: 'fa' | 'extend' | 'none'
+    asking: number
+    askingYears: number
+    max: number
+    min: number
+    offer: { amount: number; years: number } | null
+    reason: string | null
+  }
 }
 
 export type OffseasonPhase = 'lottery' | 'draft' | 'freeagency' | 'done'
@@ -401,6 +450,18 @@ export interface ManagerActions {
   incomingOffers(
     limit?: number,
   ): { other: TradePackage; user: TradePackage; assessment: TradeAssessment }[]
+  /** Players you have listed on the block. */
+  listedOnBlock(): string[]
+  /** List or unlist one of yours. */
+  listOnBlock(playerId: string, on: boolean): PlayerDesk | null
+  /** What the manager can do with this man: the block, offers, a contract. */
+  playerDesk(playerId: string): PlayerDesk | null
+  /** Add years onto a deal he already has. */
+  extendContract(
+    playerId: string,
+    amount: number,
+    years: number,
+  ): { ok: boolean; message: string; desk: PlayerDesk | null }
 
   // The offseason, step by step.
   /** Draft picks a team still holds in the next three drafts. */

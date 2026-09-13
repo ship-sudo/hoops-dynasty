@@ -13,7 +13,7 @@ import * as nba from '../nba/parse.ts'
 import { loadBref } from './load-bref.ts'
 import { openingNightRosters } from './opening-night.ts'
 import { champion, checkBracket, deriveSeries, type PlayoffGame, playoffSeeds } from './playoffs.ts'
-import { BOX_KEYS, type BoxTotals, deriveStints } from './stints.ts'
+import { BOX_KEYS, type BoxTotals, deriveStints, emptyTotals } from './stints.ts'
 
 export interface LoadOptions {
   from?: number
@@ -184,11 +184,13 @@ export async function loadSeason(
 
   // ---- playoff series and seeds ----------------------------------------------------------------
   let series: ReturnType<typeof deriveSeries> = []
-  try {
-    series = deriveSeries(playoffGames)
-    for (const p of checkBracket(series)) gaps.push([y, 'playoff_series', p])
-  } catch (e) {
-    gaps.push([y, 'playoff_series', `derivation failed: ${(e as Error).message}`])
+  if (playoffGames.length > 0) {
+    try {
+      series = deriveSeries(playoffGames)
+      for (const p of checkBracket(series)) gaps.push([y, 'playoff_series', p])
+    } catch (e) {
+      gaps.push([y, 'playoff_series', `derivation failed: ${(e as Error).message}`])
+    }
   }
   const confOf = new Map(standings.map((s) => [String(s.team_id), s.conference ?? '']))
   const seeds = playoffSeeds(
@@ -215,49 +217,87 @@ export async function loadSeason(
   )
   const advByTeam = new Map(teamAdvanced.map((t) => [String(t.team_id), t]))
   const teamRows: (string | number | null)[][] = []
-  for (const s of standings) {
-    const id = String(s.team_id)
-    const tot = totalsByTeam.get(id)
-    const a = advByTeam.get(id)
-    const po = poByTeam.get(id)
-    const abbr = abbrOf.get(id) ?? bio.find((b) => String(b.team_id) === id)?.team_abbr ?? '???'
-    if (!tot || !a) gaps.push([y, 'team_seasons', `${abbr}: missing team totals or advanced`])
-    teamRows.push([
+  const hasTeamBox = teamTotals.some((t) => t.season_type === 'regular')
+  if (hasTeamBox) {
+    for (const s of standings) {
+      const id = String(s.team_id)
+      const tot = totalsByTeam.get(id)
+      const a = advByTeam.get(id)
+      const po = poByTeam.get(id)
+      const abbr = abbrOf.get(id) ?? bio.find((b) => String(b.team_id) === id)?.team_abbr ?? '???'
+      if (!tot || !a) gaps.push([y, 'team_seasons', `${abbr}: missing team totals or advanced`])
+      teamRows.push([
+        y,
+        id,
+        abbr,
+        null, // bref_abbr: Lane B
+        s.team_name ?? '',
+        s.team_city ?? '',
+        s.conference ?? '',
+        s.division ?? '',
+        s.wins,
+        s.losses,
+        seeds.get(id) ?? null,
+        JSON.stringify({
+          conf_rank: s.playoff_rank,
+          totals: tot ? { gp: tot.gp, ...boxOf(tot) } : null,
+          advanced: a
+            ? {
+                gp: a.gp,
+                pace: a.pace,
+                poss: a.poss,
+                off_rating: a.off_rating,
+                def_rating: a.def_rating,
+                net_rating: a.net_rating,
+                ast_pct: a.ast_pct,
+                oreb_pct: a.oreb_pct,
+                dreb_pct: a.dreb_pct,
+                tm_tov_pct: a.tm_tov_pct,
+                efg_pct: a.efg_pct,
+                ts_pct: a.ts_pct,
+              }
+            : null,
+          playoffs: po ? { gp: po.gp, w: po.w, l: po.l, ...boxOf(po) } : null,
+        }),
+      ])
+    }
+  }
+  if (teamRows.length === 0) {
+    const prev = all<{
+      team_id: string
+      abbr: string
+      bref_abbr: string | null
+      name: string
+      city: string
+      conference: string
+      division: string
+      stats_json: string | null
+    }>(db, 'SELECT * FROM team_seasons WHERE year_end = ?', [y - 1])
+    if (prev.length === 0)
+      throw new Error(`season ${y} has no standings and no prior team_seasons to copy`)
+    for (const t of prev) {
+      teamRows.push([
+        y,
+        t.team_id,
+        t.abbr,
+        t.bref_abbr,
+        t.name,
+        t.city,
+        t.conference,
+        t.division,
+        0,
+        0,
+        null,
+        t.stats_json,
+      ])
+    }
+    gaps.push([
       y,
-      id,
-      abbr,
-      null, // bref_abbr: Lane B
-      s.team_name ?? '',
-      s.team_city ?? '',
-      s.conference ?? '',
-      s.division ?? '',
-      s.wins,
-      s.losses,
-      seeds.get(id) ?? null,
-      JSON.stringify({
-        conf_rank: s.playoff_rank,
-        totals: tot ? { gp: tot.gp, ...boxOf(tot) } : null,
-        advanced: a
-          ? {
-              gp: a.gp,
-              pace: a.pace,
-              poss: a.poss,
-              off_rating: a.off_rating,
-              def_rating: a.def_rating,
-              net_rating: a.net_rating,
-              ast_pct: a.ast_pct,
-              oreb_pct: a.oreb_pct,
-              dreb_pct: a.dreb_pct,
-              tm_tov_pct: a.tm_tov_pct,
-              efg_pct: a.efg_pct,
-              ts_pct: a.ts_pct,
-            }
-          : null,
-        playoffs: po ? { gp: po.gp, w: po.w, l: po.l, ...boxOf(po) } : null,
-      }),
+      'team_seasons',
+      `preseason: no standings; ${prev.length} clubs copied from ${y - 1} (0-0, last year's box as the era prior)`,
     ])
   }
-  const teamIds = new Set(standings.map((s) => String(s.team_id)))
+  const teamIds = new Set(teamRows.map((r) => String(r[1])))
 
   // ---- player seasons: stints from game logs; per-100 and advanced are season-level -----------
   const regularLogs = playerGames.filter((g) => g.season_type === 'regular')
@@ -320,6 +360,33 @@ export async function loadSeason(
     ])
   }
   if (missingBio > 0) gaps.push([y, 'player_seasons', `${missingBio} stints without a bio row`])
+  if (stints.length === 0 && ro.length > 0) {
+    const empty = JSON.stringify(emptyTotals())
+    for (const r of ro) {
+      psRows.push([
+        y,
+        String(r.player_id),
+        String(r.team_id),
+        1,
+        'regular',
+        r.age,
+        r.position,
+        r.experience,
+        0,
+        null,
+        0,
+        empty,
+        null,
+        null,
+        null,
+      ])
+    }
+    gaps.push([
+      y,
+      'player_seasons',
+      `preseason: no game logs; ${ro.length} empty stints from the current roster`,
+    ])
+  }
   for (const t of totals) {
     if (t.season_type !== 'playoffs') continue
     psRows.push([
@@ -364,7 +431,7 @@ export async function loadSeason(
     g.tov,
     g.pf,
   ])
-  if (y >= 2020)
+  if (y >= 2020 && playerGames.length > 0)
     gaps.push([y, 'player_games', 'play-in games: team logs only, no player logs cached'])
 
   // ---- rosters, coaches ------------------------------------------------------------------------
@@ -457,18 +524,14 @@ export async function loadSeason(
   const gamesPerTeamMode = mode([...gamesPerTeam.values()])
   if (!era) gaps.push([y, 'seasons', 'no era rules for this season; rules_json is {}'])
   else {
-    if (era.games !== gamesPerTeamMode)
+    if (gamesPerTeamMode > 0 && era.games !== gamesPerTeamMode)
       gaps.push([
         y,
         'seasons',
         `games per team: schedule ${gamesPerTeamMode} (kept) vs era table ${era.games}`,
       ])
-    if (era.teams !== standings.length)
-      gaps.push([
-        y,
-        'seasons',
-        `teams: standings ${standings.length} (kept) vs era table ${era.teams}`,
-      ])
+    if (era.teams !== teamRows.length)
+      gaps.push([y, 'seasons', `teams: ${teamRows.length} (kept) vs era table ${era.teams}`])
   }
 
   // ---- write ------------------------------------------------------------------------------------
@@ -480,7 +543,7 @@ export async function loadSeason(
     }
     db.prepare(
       'INSERT INTO seasons (year_end, season_id, games, teams, rules_json) VALUES (?, ?, ?, ?, ?)',
-    ).run(y, seasonId(y), gamesPerTeamMode, standings.length, era ? JSON.stringify(era) : '{}')
+    ).run(y, seasonId(y), gamesPerTeamMode, teamRows.length, era ? JSON.stringify(era) : '{}')
     counts.seasons = 1
     run(
       'team_seasons',

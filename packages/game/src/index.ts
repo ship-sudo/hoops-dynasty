@@ -1,3 +1,11 @@
+export {
+  type AllStarBreak,
+  type AllStarPick,
+  allStarDate,
+  holdAllStarBreak,
+  isAllStarRestDay,
+  pickAllStars,
+} from './allstar.ts'
 export { type Cand, candidates, computeAwards } from './awards.ts'
 export { addDays, addYears, daysBetween } from './dates.ts'
 export {

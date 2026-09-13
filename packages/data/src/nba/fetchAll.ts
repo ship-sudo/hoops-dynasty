@@ -1,7 +1,7 @@
 // Fetch every stats.nba.com endpoint for every season into data/raw/nba/.
 // Idempotent: cached keys are read from disk, not refetched. Failures are logged and skipped.
 //
-//   HOOPS_DATA_DIR=... npx tsx packages/data/src/nba/fetchAll.ts [--from 1998] [--to 2026]
+//   HOOPS_DATA_DIR=... npx tsx packages/data/src/nba/fetchAll.ts [--from 1998] [--to 2027]
 //
 // Writes a run summary to <DATA_DIR>/raw/nba/_fetchAll.json (merged across runs).
 

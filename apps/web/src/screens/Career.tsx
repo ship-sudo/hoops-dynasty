@@ -1,12 +1,7 @@
 /**
  * A player's career, in one place: every season he ever played, his peak, his clubs, his honours,
- * where he stands in his franchise's all-time lists — and, when he is a real player, the career he
- * really had beside the one he had for you.
- *
- * This is the screen the whole history module exists for. People remember a name for a decade; the
- * game has to be able to show them why.
+ * where he stands in his franchise's all-time lists.
  */
-import type { CareerArc } from '@hoops/core'
 import {
   type Career,
   type CareerSeason,
@@ -19,11 +14,11 @@ import {
   peakSeason,
   totalsOf,
 } from '@hoops/game'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useStore } from '../store.tsx'
 import { Modal, Panel, TeamChip } from '../ui/bits.tsx'
-import { n1, ordinal, pct1, per, seasonLabel } from '../ui/format.ts'
-import { loadRealHistory, type RealHistory, realHistory } from '../ui/realhistory.ts'
+import { ordinal, pct1, per, seasonLabel } from '../ui/format.ts'
+import { PlayerActions } from './PlayerActions.tsx'
 
 const thousands = (n: number): string => Math.round(n).toLocaleString('en-US')
 
@@ -105,58 +100,8 @@ function withCurrentSeason(
   return { ...base, seasons: [...base.seasons, current] }
 }
 
-function RealCareer({ arc, career }: { arc: CareerArc; career: Career }) {
-  const { teamById } = useStore()
-  const mine = new Map(career.seasons.map((s) => [s.yearEnd, s]))
-  return (
-    <div className="table-x">
-      <table className="grid">
-        <thead>
-          <tr>
-            <th className="text">Season</th>
-            <th className="text">Really played for</th>
-            <th title="Games he really played">GP</th>
-            <th title="Minutes per game he really played">MPG</th>
-            <th title="Games he played for you that season">Your GP</th>
-            <th title="Minutes per game he played for you">Your MPG</th>
-          </tr>
-        </thead>
-        <tbody>
-          {arc.seasons.map((s) => {
-            const sim = mine.get(s.yearEnd)
-            return (
-              <tr key={s.yearEnd}>
-                <td className="text">{seasonLabel(s.yearEnd)}</td>
-                <td className="text">
-                  <TeamChip team={teamById.get(s.teamId)} long />
-                </td>
-                <td className="num dim">{s.gp}</td>
-                <td className="num dim">{n1(s.mpg)}</td>
-                <td className="num">{sim ? sim.gp : '—'}</td>
-                <td className="num">{sim ? per(sim.min, sim.gp) : '—'}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 export function PlayerCareer({ playerId, onClose }: { playerId: string; onClose: () => void }) {
   const { game, teamById } = useStore()
-  const [real, setReal] = useState<RealHistory | null>(realHistory())
-  const [realProblem, setRealProblem] = useState<string | null>(null)
-
-  useEffect(() => {
-    let live = true
-    loadRealHistory()
-      .then((r) => live && setReal(r))
-      .catch((e: unknown) => live && setRealProblem(e instanceof Error ? e.message : String(e)))
-    return () => {
-      live = false
-    }
-  }, [])
 
   const career = useMemo(
     () => (game ? withCurrentSeason(game, careerOf(game, playerId), playerId) : null),
@@ -168,7 +113,6 @@ export function PlayerCareer({ playerId, onClose }: { playerId: string; onClose:
   const peak = peakSeason(career.seasons)
   const active = game.league.players.find((p) => p.playerId === playerId)
   const hall = (game.hallOfFame ?? []).find((h) => h.playerId === playerId)
-  const arc = real?.arcs.get(playerId) ?? null
 
   // The club he is most a part of: where he played the most seasons, ties going to the latest.
   const mainTeamId = [...totals.teams].sort((a, b) => {
@@ -310,24 +254,10 @@ export function PlayerCareer({ playerId, onClose }: { playerId: string; onClose:
               </table>
             </div>
           </Panel>
-
-          {arc ? (
-            <Panel title="The career he really had">
-              <RealCareer arc={arc} career={career} />
-              <p className="faint" style={{ fontSize: 11, marginTop: 6, marginBottom: 0 }}>
-                From <code>history.json</code>: the seasons, clubs, games and minutes of his real
-                career. Everything to the right of the line is what he did in your league.
-              </p>
-            </Panel>
-          ) : realProblem ? (
-            <p className="faint" style={{ fontSize: 11 }}>
-              The real record could not be loaded ({realProblem}), so there is nothing to compare
-              this career with.
-            </p>
-          ) : null}
         </div>
 
         <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
+          <PlayerActions playerId={playerId} onChanged={onClose} />
           {hall ? (
             <Panel title={`Hall of Fame · ${hall.year}`}>
               <p style={{ margin: 0 }}>{hall.case}</p>

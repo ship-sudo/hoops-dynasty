@@ -200,7 +200,7 @@ export function AllStar() {
           <p style={{ margin: 0 }}>
             {away > 0
               ? `The break is ${away} day${away === 1 ? '' : 's'} away. These are the squads on today's vote — a man can still play his way in, or out.`
-              : 'The break is here. Press Continue and the game is played.'}
+              : 'The break is here. Continue and the exhibition is played.'}
           </p>
         )}
 

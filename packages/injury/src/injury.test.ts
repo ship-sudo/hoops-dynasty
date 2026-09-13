@@ -80,6 +80,11 @@ test('injury outlook names a man who barely played last year', () => {
   assert.match(injuryOutlook(90, 26, 5), /iron man/i)
 })
 
+test('a 35-year-old on 24 minutes is a managed night, not a pounding', () => {
+  assert.match(injuryOutlook(50, 35, 14, 70, 24), /managed night/i)
+  assert.doesNotMatch(injuryOutlook(50, 35, 14, 70, 36), /managed night/i)
+})
+
 test('condition holds at a sane load and slides at a mad one', () => {
   const hold = (minutes: number, games = 82) => {
     let c = 1

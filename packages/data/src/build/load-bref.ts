@@ -19,6 +19,7 @@ import { all, prepareInsert, transaction } from '../db/db.ts'
 import { ERA } from '../era/era.ts'
 import { loadAllStarSelections, loadAwardShares, loadEndOfSeasonTeams } from '../open/awards.ts'
 import * as bref from '../open/bref.ts'
+import { ensureCurrentContracts } from '../open/contracts-current.ts'
 import { loadAllSalaries, type SalaryRow, WAYBACK_SEASONS } from '../open/salaries.ts'
 import { loadWaybackContracts } from '../open/wayback.ts'
 import { contractKind, inferYears } from './contracts-infer.ts'
@@ -98,6 +99,12 @@ export async function loadBref(
     if (!a.abbreviation) continue
     const id = teamIdOf(a.season, a.abbreviation)
     if (id) brefAbbrOf.set(`${a.season}|${id}`, a.abbreviation)
+  }
+  for (const t of teamRows) {
+    const k = `${t.year_end}|${t.team_id}`
+    if (brefAbbrOf.has(k)) continue
+    const prev = brefAbbrOf.get(`${t.year_end - 1}|${t.team_id}`)
+    if (prev) brefAbbrOf.set(k, prev)
   }
 
   // ---- ids ----------------------------------------------------------------------------------------
@@ -528,9 +535,100 @@ export async function loadBref(
       ])
     }
   }
+  let currentPage: Awaited<ReturnType<typeof ensureCurrentContracts>> | null = null
+  let currentSource: 'bref_current' | 'wayback' = 'bref_current'
+  try {
+    currentPage = await ensureCurrentContracts()
+  } catch {
+    currentPage = null
+  }
+  const liveYears = new Set(waybackSeasons)
+  if (!currentPage && from <= 2027 && to >= 2027) {
+    const prev = await loadWaybackContracts(2026)
+    if (prev) {
+      currentSource = 'wayback'
+      currentPage = {
+        first_season_end: 2027,
+        columns: { y1: '2026-27' },
+        rows: prev.rows.map((row) => ({
+          ...row,
+          seasons: row.seasons.filter((s) => s.season_end >= 2027),
+        })),
+      }
+      gaps.push([
+        2027,
+        'contracts',
+        'preseason 2027: current contracts page missing; remaining years from the 2025-26 Wayback snapshot (summer 2026 deals absent)',
+      ])
+    }
+  }
+  if (currentPage && currentPage.first_season_end >= from && currentPage.first_season_end <= to) {
+    const y = currentPage.first_season_end
+    liveYears.add(y)
+    const rosterNames = all<{ player_id: string; name: string }>(
+      db,
+      `SELECT DISTINCT p.player_id, p.name FROM players p
+       JOIN player_seasons s ON s.player_id = p.player_id AND s.year_end = ?`,
+      [y],
+    )
+    const byName = new Map(rosterNames.map((n) => [n.name.toLowerCase(), n.player_id]))
+    let currentNoId = 0
+    for (const row of currentPage.rows) {
+      const nba =
+        (row.player_id ? (nbaIdOf.get(row.player_id) ?? null) : null) ??
+        byName.get(row.player.toLowerCase()) ??
+        null
+      if (!nba) {
+        currentNoId++
+        continue
+      }
+      const years = row.seasons
+        .filter((s) => s.season_end >= y && s.salary > 0)
+        .sort((a, b) => a.season_end - b.season_end)
+        .map((s) => ({
+          yearEnd: s.season_end,
+          amount: s.salary,
+          option: s.option,
+          guaranteed: true,
+        }))
+      const first = years[0]
+      if (!first || first.yearEnd !== y) continue
+      const teamId = teamIdOf(y, row.team)
+      if (!teamId) {
+        contractsNoTeam++
+        continue
+      }
+      contractRows.push([
+        y,
+        nba,
+        teamId,
+        kindOf(nba, y, first.amount),
+        JSON.stringify(years),
+        currentSource,
+      ])
+      const sKey = `${y}|${nba}|wayback`
+      if (!salaryInserts.has(sKey)) {
+        salaryInserts.set(sKey, [y, nba, teamId, first.amount, 'wayback'])
+        const h = history.get(nba) ?? new Map()
+        h.set(y, { amount: first.amount, teamId })
+        history.set(nba, h)
+      }
+    }
+    if (currentNoId > 0)
+      gaps.push([
+        y,
+        'contracts',
+        `${currentNoId} current-page rows dropped: no NBA id (bref map or roster name)`,
+      ])
+    gaps.push([
+      y,
+      'contracts',
+      `preseason ${y}: salaries from the current contracts page (y1=${currentPage.columns.y1})`,
+    ])
+  }
   for (const [nba, h] of history) {
     for (const [y, s] of h) {
-      if (waybackSeasons.has(y) || !s.teamId) continue
+      if (liveYears.has(y) || !s.teamId) continue
       const amounts = new Map([...h].map(([yy, v]) => [yy, v.amount]))
       const years = inferYears(amounts, y).map((x) => ({ ...x, option: null, guaranteed: true }))
       if (years.length === 0) continue

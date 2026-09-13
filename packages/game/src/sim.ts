@@ -10,10 +10,11 @@
 //   offseason ages, contracts, the hooks, and the next season's calendar
 
 import { makeRng, type Rng } from '@hoops/core'
+import { allStarDate, holdAllStarBreak } from './allstar.ts'
 import { computeAwards } from './awards.ts'
 import { addDays } from './dates.ts'
 import { runDraft, startDraft } from './draft.ts'
-import { playGame, type SimInterrupt, takeSimInterrupt } from './play.ts'
+import { playGame, type SimInterrupt, setSimInterrupt, takeSimInterrupt } from './play.ts'
 import { playInDay, playoffDay, startPlayIn, startPlayoffs } from './playoffs.ts'
 import { rollover } from './rollover.ts'
 import type { GameHooks, GameState, GameSummary, ScheduledGame, SeasonSummary } from './state.ts'
@@ -26,7 +27,7 @@ export interface DayResult {
   results: GameSummary[]
   /** Set on the day the season rolls over. */
   summary: SeasonSummary | null
-  /** User-team newsworthy injury from the last completed day, if any. Not persisted. */
+  /** Why a multi-day sim stopped after this day, if it did. Not persisted. */
   interrupt: SimInterrupt | null
 }
 
@@ -65,6 +66,14 @@ function step(
             text: `${mvp.name} (${mvp.teamId}) is MVP`,
           })
         }
+        const rec = state.records[state.userTeamId]
+        setSimInterrupt(state, {
+          kind: 'season',
+          yearEnd: state.season.yearEnd,
+          mvpName: mvp?.name ?? null,
+          userWins: rec?.wins ?? 0,
+          userLosses: rec?.losses ?? 0,
+        })
         state.playIn = startPlayIn(state)
         if (state.playIn) {
           state.phase = 'playin'
@@ -76,7 +85,42 @@ function step(
         }
         state.calendar.date = addDays(today, 3)
       } else {
-        state.calendar.date = (sched[state.calendar.next] as { date: string }).date
+        const nextDate = (sched[state.calendar.next] as { date: string }).date
+        const first = sched[0]?.date
+        const last = sched.at(-1)?.date
+        const asDate = first && last ? allStarDate(first, last) : null
+        const held = state.allStar?.yearEnd === state.season.yearEnd
+        if (asDate && !held && (today >= asDate || nextDate > asDate)) {
+          const on = today >= asDate ? today : asDate
+          const night = holdAllStarBreak(state, hooks, rng, on)
+          state.calendar.date = on
+          const mvpId = night.result?.mvpPlayerId
+          const mvp =
+            mvpId != null
+              ? (state.league.players.find((p) => p.playerId === mvpId)?.name ?? null)
+              : null
+          const yours = [...night.east, ...night.west]
+            .map((p) => state.league.players.find((x) => x.playerId === p.playerId))
+            .filter((p) => p?.teamId === state.userTeamId)
+            .map((p) => p?.name ?? '')
+            .filter(Boolean)
+          setSimInterrupt(state, {
+            kind: 'allstar',
+            date: on,
+            yearEnd: state.season.yearEnd,
+            eastPts: night.result?.eastPts ?? 0,
+            westPts: night.result?.westPts ?? 0,
+            mvpName: mvp,
+            yours,
+          })
+          const score =
+            night.result != null
+              ? ` East ${night.result.eastPts}–${night.result.westPts} West.`
+              : ''
+          phaseLog(state, `All-Star weekend.${score}`)
+        } else {
+          state.calendar.date = nextDate
+        }
       }
       break
     }
@@ -159,8 +203,8 @@ export function simDay(state: GameState, hooks: GameHooks): DayResult {
 }
 
 /**
- * N league days. Stops after a user-team newsworthy injury so the manager can fix the lineup.
- * Headless full-season runners use simToDate / simSeason and do not pause.
+ * N league days. Stops after a recap (injury, All-Star, end of the regular season) so the
+ * manager can read it. Headless full-season runners use simToDate / simSeason and do not pause.
  */
 export function simDays(state: GameState, hooks: GameHooks, days: number): DayResult {
   return run(state, hooks, (_s, d, interrupt) => d >= days || Boolean(interrupt))

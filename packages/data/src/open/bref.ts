@@ -25,7 +25,7 @@ export interface Range {
   from?: number
   to?: number
 }
-export const DEFAULT_RANGE = { from: 1998, to: 2026 }
+export const DEFAULT_RANGE = { from: 1998, to: 2027 }
 
 export function readCachedCsv(repo: string, base: string): string {
   return readFileSync(cachePath(GITHUB_SOURCE, `sumitrodatta/${repo}/${base}`), 'utf8')

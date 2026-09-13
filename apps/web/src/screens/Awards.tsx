@@ -50,7 +50,7 @@ export function Awards() {
   if (!snapshot) return null
   const state = snapshot.state
   const history = (game?.history ?? []).filter((h) => h.awards)
-  const done = state.seasonComplete
+  const done = Boolean(game?.awards)
 
   return (
     <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>

@@ -14,8 +14,11 @@ import { type GameState, type LeaguePlayer, moraleOf, newGame, pickKey } from '@
 import { draftPotential, overall } from '@hoops/progression'
 import {
   askingFrom,
+  askingToStay,
+  extendPlayer,
   freeAgentPool,
   type Potentials,
+  recordTaxBills,
   runMarket,
   seasonTaxBills,
   whatHeWants,
@@ -286,6 +289,73 @@ test('the luxury tax is assessed and written into the league log', { skip }, () 
     .filter((e) => e.kind === 'note' && /luxury tax/.test(e.text))
   assert.equal(notes.length, out.tax.length, 'every bill should reach the log')
   for (const t of out.tax) assert.ok(t.bill > 0)
+  recordTaxBills(state, yearEnd + 1, out.tax)
+  assert.ok((state.taxPaid?.[out.tax[0]!.teamId] ?? []).includes(yearEnd + 1))
+})
+
+test('a repeater is billed at the surcharge, not the standard rates', { skip }, () => {
+  const { state } = opening()
+  const yearEnd = state.season.yearEnd
+  const first = seasonTaxBills(state, yearEnd)[0]
+  assert.ok(first, 'need a taxpayer to prove the surcharge')
+  state.season.rules = {
+    ...state.season.rules,
+    luxury_tax_scheme: 'incremental',
+    tax_rates: {
+      bracket: 5_000_000,
+      standard: [1.5, 1.75, 2.5, 3.25],
+      repeater: [2.5, 2.75, 3.5, 4.25],
+      step: 0.5,
+      repeater_rule: '3_of_4_prior',
+    },
+  }
+  const plain = seasonTaxBills(state, yearEnd).find((b) => b.teamId === first.teamId)
+  state.taxPaid = { [first.teamId]: [yearEnd - 1, yearEnd - 2, yearEnd - 3] }
+  const rpt = seasonTaxBills(state, yearEnd).find((b) => b.teamId === first.teamId)
+  assert.equal(plain?.repeater, false)
+  assert.equal(rpt?.repeater, true)
+  assert.ok((rpt?.bill ?? 0) > (plain?.bill ?? 0), 'repeater rates cost more')
+})
+
+test('listing a man on the block draws offers for him, not the rest of the roster', {
+  skip,
+}, () => {
+  const { state, potentials } = opening()
+  const star = tradeBlock(state, SAS(), potentials)[0]
+  assert.ok(star)
+  state.listed = [star.playerId]
+  const offers = incomingOffers(state, potentials, makeRng(9), 12)
+  assert.ok(offers.length > 0, 'somebody should come in on a listed star')
+  assert.ok(
+    offers.every((o) => o.user.players.includes(star.playerId)),
+    'every offer should be for the man you listed',
+  )
+})
+
+test('you can extend a man who is still under contract', { skip }, () => {
+  const { state, potentials } = opening()
+  const yearEnd = state.season.yearEnd
+  const man = state.league.players.find((p) => {
+    if (p.teamId !== SAS() || !p.contract) return false
+    const rem = p.contract.years.filter((y) => y.yearEnd >= yearEnd).length
+    return rem >= 1 && rem <= 3
+  })
+  assert.ok(man?.contract, 'need a Spur with room left on his deal')
+  moraleOf(state, man).value = 10
+  const no = extendPlayer(
+    state,
+    man.playerId,
+    askingToStay(state, man, potentials).amount,
+    1,
+    potentials,
+  )
+  assert.equal(no.ok, false)
+  moraleOf(state, man).value = 60
+  const before = man.contract.years.length
+  const ask = askingToStay(state, man, potentials)
+  const res = extendPlayer(state, man.playerId, ask.amount, 2, potentials)
+  assert.equal(res.ok, true, res.message)
+  assert.equal(man.contract.years.length, before + 2)
 })
 
 test('league payroll stays in the realm of the cap', { skip }, () => {

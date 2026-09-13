@@ -1,5 +1,5 @@
 // Pipeline CLI. From the repo root:
-//   npm run pipeline -- <fetch|load|bundles|report|all> [--from 1998] [--to 2026]
+//   npm run pipeline -- <fetch|load|bundles|report|all> [--from 1998] [--to 2027]
 // Set HOOPS_DATA_DIR to share the raw cache across worktrees and HOOPS_OFFLINE=1 to forbid fetching.
 
 import { rmSync } from 'node:fs'

@@ -1,4 +1,4 @@
-// Era table 1997-98 → 2025-26. Hand-curated. Every number is cited in SOURCES.md.
+// Era table 1997-98 → 2026-27. Hand-curated. Every number is cited in SOURCES.md.
 // Money is whole dollars. Keyed by the year the season ends.
 
 import type {
@@ -13,7 +13,7 @@ import type {
 } from '@hoops/core'
 
 const FIRST = 1998
-const LAST = 2026
+const LAST = 2027
 
 // ---------- money by season ----------
 
@@ -444,6 +444,20 @@ const MONEY: Record<number, Money> = {
     mleRoom: 8_781_000,
     bae: 5_134_000,
   },
+  2027: {
+    cap: 164_961_000,
+    tax: 200_428_000,
+    apron1: 209_015_000,
+    apron2: 221_686_000,
+    min0: 1_357_763,
+    min10: 3_876_529,
+    max: [41_240_250, 49_488_300, 57_736_350],
+    pick1: 13_109_000,
+    mle: 15_044_000,
+    mleTax: 6_064_000,
+    mleRoom: 9_366_000,
+    bae: 5_477_000,
+  },
 }
 
 // ---------- per-season facts ----------
@@ -622,6 +636,13 @@ const FACTS: Record<number, Facts> = {
       'New tax rates: $1.00/$1.25/$3.50/$4.75 standard, $3.00/$3.25/$5.50/$6.75 repeater, +$0.50 per further bracket. Bracket width approx. $5.685M.',
     unverified: ['tax_rates'],
   },
+  2027: {
+    teams: 30,
+    games: 82,
+    notes:
+      "Opening-night 2026-27 board. No games have been played, so ratings and minutes priors are last season's, and the schedule is generated. Rookie-scale #1 for the 2027 draft is cap-scaled from 2026.",
+    unverified: ['rookie_scale_pick1', 'tax_rates'],
+  },
 }
 
 // ---------- rule blocks by CBA ----------
@@ -743,13 +764,14 @@ function taxRates(y: number): TaxRates | null {
       repeater_rule: '3_of_4_prior',
     }
   }
-  return {
-    bracket: 5_685_000,
+  const rates2026 = {
     standard: [1.0, 1.25, 3.5, 4.75],
     repeater: [3.0, 3.25, 5.5, 6.75],
     step: 0.5,
-    repeater_rule: '3_of_4_prior',
+    repeater_rule: '3_of_4_prior' as const,
   }
+  if (y === 2026) return { bracket: 5_685_000, ...rates2026 }
+  return { bracket: 6_064_000, ...rates2026 }
 }
 
 /** 1000 combinations: 250, 200, 157, 120, 89, 64, 44, 29, 18, 11, 7, 6, 5. */

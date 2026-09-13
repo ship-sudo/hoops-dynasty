@@ -60,6 +60,9 @@ import './tactics.css'
 
 /** The automatic ladder, mirrored from packages/game/src/rotation.ts. It sums to exactly 240. */
 const LADDER = [36, 34, 32, 30, 28, 22, 18, 15, 12, 8, 5]
+/** Regular-season auto: nine men. Playoffs shrink. r/nba consensus is 8–9 / 7–8. */
+const AUTO_RS = [34, 32, 30, 28, 26, 24, 22, 18, 16]
+const AUTO_PO = [38, 36, 34, 32, 28, 24, 20, 16]
 /** Discrete minutes a manager can assign. Current values not on the list stay selectable. */
 const MINUTE_STEPS = [0, 8, 12, 16, 18, 20, 22, 24, 28, 32, 36, 40]
 
@@ -85,6 +88,26 @@ const UNIT_LABEL: Record<LineupUnitId, string> = {
 // The card carries the rating a person should read — a flat mean of the raw nineteen says an
 // All-Star is a 55.
 const overallOf = (r: RosterRow) => r.card.overall
+
+/** Best remaining body for each slot. Naturals first, then the next-closest position. */
+function pickFive(
+  pool: RosterRow[],
+  taken: Set<string>,
+): Partial<Record<Position, string>> {
+  const next: Partial<Record<Position, string>> = {}
+  for (const gap of [0, 1, 2, 3, 4]) {
+    for (const pos of POSITIONS) {
+      if (next[pos]) continue
+      const man = pool.find(
+        (r) => !taken.has(r.player.playerId) && Math.abs(positionGap(r.player.pos, pos)) === gap,
+      )
+      if (!man) continue
+      next[pos] = man.player.playerId
+      taken.add(man.player.playerId)
+    }
+  }
+  return next
+}
 
 type Knob = Exclude<keyof TacticsSettings, 'zone'>
 
@@ -517,7 +540,7 @@ function PlayerPop({
 }
 
 export function Tactics() {
-  const { client, snapshot, teamById } = useStore()
+  const { client, snapshot, teamById, game } = useStore()
   const me = snapshot?.state.userTeamId ?? ''
 
   const [rows, setRows] = useState<RosterRow[]>([])
@@ -801,21 +824,85 @@ export function Tactics() {
       .filter((r): r is RosterRow => !!r)
       .sort((a, b) => overallOf(b) - overallOf(a))
     const taken = new Set<string>()
-    const next: Partial<Record<Position, string>> = {}
-    // Two passes: naturals first, so a genuine centre is never spent on the power forward slot.
-    for (const gap of [0, 1, 2, 3, 4]) {
-      for (const pos of POSITIONS) {
-        if (next[pos]) continue
-        const man = pool.find(
-          (r) => !taken.has(r.player.playerId) && Math.abs(positionGap(r.player.pos, pos)) === gap,
-        )
-        if (!man) continue
-        next[pos] = man.player.playerId
-        taken.add(man.player.playerId)
-      }
-    }
+    const next = pickFive(pool, taken)
     commit({ lineup: next, inactive: inactive.filter((x) => !taken.has(x)) })
   }, [active, byId, inactive, commit])
+
+  /**
+   * One click for a real rotation: starters, bench, closing, and an 8–9 man minutes split.
+   * Veterans (34+) are capped at 24 unless you change it after — sitting them is how they stay
+   * healthy. The engine already injures less when the minutes are lower; this is the plan that
+   * makes that true.
+   */
+  const autoAdjust = useCallback(() => {
+    const pool = order
+      .filter((id) => !benched.has(id))
+      .map((id) => byId.get(id))
+      .filter((r): r is RosterRow => !!r)
+      .sort((a, b) => overallOf(b) - overallOf(a))
+    const taken = new Set<string>()
+    const starters = pickFive(pool, taken)
+    const benchUnit = pickFive(pool, taken)
+    const closing = { ...starters }
+    const units: NamedLineups = { starters, bench: benchUnit, closing }
+    const rotation: string[] = []
+    for (const slots of [starters, benchUnit]) {
+      for (const pos of POSITIONS) {
+        const id = slots[pos]
+        if (id && !rotation.includes(id)) rotation.push(id)
+      }
+    }
+    const playoffs = game?.phase === 'playoffs' || game?.phase === 'playin'
+    const ladder = playoffs ? AUTO_PO : AUTO_RS
+    const depth = ladder.length
+    while (rotation.length < depth) {
+      const extra = pool.find((r) => !rotation.includes(r.player.playerId))
+      if (!extra) break
+      rotation.push(extra.player.playerId)
+    }
+    const used = rotation.slice(0, depth)
+    const nextMin: Record<string, number> = { ...minutes }
+    for (const id of order) nextMin[id] = 0
+    const caps = used.map((id) => {
+      const age = byId.get(id)?.player.age ?? 0
+      return age >= 34 ? 24 : 40
+    })
+    let want = used.map((_, i) => ladder[i] ?? 0)
+    for (let pass = 0; pass < 8; pass++) {
+      want = want.map((m, i) => Math.min(caps[i] ?? 40, m))
+      const sum = want.reduce((a, b) => a + b, 0) || 1
+      if (Math.abs(sum - TEAM_MINUTES) < 0.5) break
+      const room = used.map((_, i) => (caps[i] ?? 40) - (want[i] ?? 0))
+      const free = room.reduce((a, b) => a + Math.max(0, b), 0)
+      const need = TEAM_MINUTES - want.reduce((a, b) => a + b, 0)
+      if (free <= 0 || need === 0) break
+      want = want.map((m, i) => m + (Math.max(0, room[i] ?? 0) / free) * need)
+    }
+    used.forEach((id, i) => {
+      nextMin[id] = Math.round(want[i] ?? 0)
+    })
+    let drift = TEAM_MINUTES - used.reduce((s, id) => s + (nextMin[id] ?? 0), 0)
+    const order2 = [...used].sort((a, b) => (nextMin[b] ?? 0) - (nextMin[a] ?? 0))
+    for (let pass = 0; pass < 4 && drift !== 0; pass++) {
+      for (const id of drift > 0 ? order2 : [...order2].reverse()) {
+        if (drift === 0) break
+        const i = used.indexOf(id)
+        const step = drift > 0 ? 1 : -1
+        const v = (nextMin[id] ?? 0) + step
+        if (v < 0 || v > (caps[i] ?? 40)) continue
+        nextMin[id] = v
+        drift -= step
+      }
+    }
+    const depthOrder = [...used, ...order.filter((id) => !used.includes(id))]
+    commit({
+      depth: depthOrder,
+      lineup: starters,
+      lineups: units,
+      minutes: nextMin,
+      inactive: order.filter((id) => !used.includes(id)),
+    })
+  }, [order, benched, byId, minutes, game, commit])
 
   /** Fill a slot. If he is already in another slot the two men swap, which is what you meant. */
   const setSlot = useCallback(
@@ -936,6 +1023,9 @@ export function Tactics() {
         <div className="pagehead">
           <h1>{team ? `${team.city} ${team.name} — tactics` : 'Tactics'}</h1>
           <span style={{ flex: 1 }} />
+          <button type="button" className="ghost" onClick={autoAdjust} disabled={rows.length === 0}>
+            Auto-adjust lineups
+          </button>
           <button type="button" className="ghost" onClick={balance} disabled={active.length === 0}>
             Balance to 240
           </button>

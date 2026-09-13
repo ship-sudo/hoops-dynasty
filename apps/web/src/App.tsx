@@ -16,9 +16,10 @@ import { Staff } from './screens/Staff.tsx'
 import { Standings } from './screens/Standings.tsx'
 import { Tactics } from './screens/Tactics.tsx'
 import { Trade } from './screens/Trade.tsx'
-import { type Screen, useStore } from './store.tsx'
+import { useStore } from './store.tsx'
 import { longDate } from './ui/format.ts'
 import { InjuryPause } from './ui/InjuryPause.tsx'
+import { ALL_DESTS, GameNav, SaveMenu } from './ui/Nav.tsx'
 import {
   applyTeamAccent,
   readThemeChoice,
@@ -27,22 +28,6 @@ import {
   writeThemeChoice,
 } from './ui/theme.ts'
 
-const SCREENS: [Screen, string, string][] = [
-  ['home', 'Home', '1'],
-  ['league', 'League', 'l'],
-  ['awards', 'Awards', 'a'],
-  ['allstar', 'All-Star', 'g'],
-  ['playoffs', 'Playoffs', 'p'],
-  ['standings', 'Standings', '2'],
-  ['roster', 'Roster', '3'],
-  ['schedule', 'Schedule', '4'],
-  ['tactics', 'Tactics', '5'],
-  ['staff', 'Staff', '6'],
-  ['trade', 'Trade', '7'],
-  ['offseason', 'Offseason', '8'],
-  ['dynasty', 'Dynasty', '9'],
-  ['history', 'Vs reality', '0'],
-]
 
 /**
  * Light, dark, or whatever the machine is set to. Stored, so a save opened tomorrow morning looks
@@ -104,10 +89,10 @@ function Shell() {
       const target = e.target as HTMLElement | null
       if (target && /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) return
       if (document.querySelector('.modal-backdrop')) return
-      const hit = SCREENS.find(([, , key]) => key === e.key)
+      const hit = ALL_DESTS.find((d) => d.key === e.key)
       if (hit) {
         e.preventDefault()
-        setScreen(hit[0])
+        setScreen(hit.id)
         return
       }
       if ((e.key === ' ' || e.key === 'Enter') && !busy && !snapshot?.state.seasonComplete) {
@@ -135,19 +120,7 @@ function Shell() {
         </span>
         {snapshot ? (
           <>
-            <nav className="nav">
-              {SCREENS.map(([id, label, key]) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-current={screen === id}
-                  onClick={() => setScreen(id)}
-                  title={`Key ${key}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </nav>
+            <GameNav screen={screen} onGo={setScreen} />
             <span className="spacer" />
             <span className="clock">
               <span className="club">{team ? `${team.city} ${team.name}` : ''}</span>
@@ -165,19 +138,13 @@ function Shell() {
             >
               {choice === 'system' ? '◐' : choice === 'light' ? '☀' : '☾'}
             </button>
-            <button
-              type="button"
-              className="ghost"
-              onClick={async () => downloadSave(await exportSave())}
-            >
-              Export
-            </button>
-            <button type="button" className="ghost" onClick={onImport}>
-              Import
-            </button>
-            <button type="button" className="ghost" onClick={quitToMenu}>
-              Menu
-            </button>
+            <SaveMenu
+              onExport={() => {
+                void exportSave().then(downloadSave)
+              }}
+              onImport={() => void onImport()}
+              onQuit={quitToMenu}
+            />
           </>
         ) : (
           <>

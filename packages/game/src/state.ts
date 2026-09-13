@@ -18,6 +18,7 @@ import type {
   YearEnd,
 } from '@hoops/core'
 import type { Injury } from '@hoops/injury'
+import type { AllStarBreak } from './allstar.ts'
 // Types only, so the cycle with history.ts is erased at compile time.
 import type { GameRecord, HallOfFamer } from './history.ts'
 import type { PlayerMorale } from './morale.ts'
@@ -324,6 +325,21 @@ export interface GameState {
    * missing profile means "no effect". `initStaff` gives it one at the next rollover.
    */
   staff?: StaffState
+  /**
+   * This season's All-Star weekend, once it has been held. Optional so old saves load; absent
+   * means the break has not happened yet this year.
+   */
+  allStar?: AllStarBreak
+  /**
+   * Seasons each club actually paid luxury tax, by team id. Optional so old saves load; missing
+   * means nobody has been billed in this save yet, so nobody is a repeater on night one.
+   */
+  taxPaid?: Record<string, number[]>
+  /**
+   * Players the user has listed on the block. Optional so old saves load. Only ids still on his
+   * roster count; the rest are ignored.
+   */
+  listed?: string[]
   log: LogEvent[]
   /** Per-team coaching settings. Only teams the user has touched need an entry. */
   teamSettings: Record<string, TeamSettings>
@@ -349,7 +365,7 @@ export interface GameHooks {
   develop?: (state: GameState, rng: Rng) => void
   /**
    * Era seam. Called at rollover for the season about to start. Return that season's rules and
-   * league baselines when the caller has them (the era table covers 1998-2026). Default: the
+   * league baselines when the caller has them (the era table covers 1998-2027). Default: the
    * bundle's rules and EraContext are kept and only the money grows, which is what SPEC §4 asks
    * for beyond the last real season.
    */

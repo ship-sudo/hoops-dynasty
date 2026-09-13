@@ -10,6 +10,7 @@ import {
   type FaTeam,
   type FreeAgent,
   isLegalTrade,
+  isTaxRepeater,
   maxSalary,
   payroll,
   pickValue,
@@ -166,6 +167,14 @@ test('luxury tax: none, flat, incremental and repeater', () => {
   // 6m over: 5m at 1.5 plus 1m at 1.75.
   assert.equal(taxBill(salaries(90_740_000), r), 5_000_000 * 1.5 + 1_000_000 * 1.75)
   assert.ok(taxBill(salaries(90_740_000), r, { repeater: true }) > taxBill(salaries(90_740_000), r))
+})
+
+test('repeater status is three of the last four, or all of the last three', () => {
+  assert.equal(isTaxRepeater([2013, 2014, 2015], 2016, 'all_3_prior'), true)
+  assert.equal(isTaxRepeater([2013, 2014], 2016, 'all_3_prior'), false)
+  assert.equal(isTaxRepeater([2012, 2013, 2015], 2016, '3_of_4_prior'), true)
+  assert.equal(isTaxRepeater([2012, 2013], 2016, '3_of_4_prior'), false)
+  assert.equal(isTaxRepeater([2013, 2014, 2015], 2016, null), false)
 })
 
 test('max salary follows years of service, by percent or by dollars', () => {

@@ -274,10 +274,8 @@ input[type="text"] {
   align-items: center;
   gap: 8px;
   font-family: var(--display);
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-size: 11px;
+  font-weight: 700;
+  font-size: 13px;
   color: var(--ink-dim);
   flex: 0 0 auto;
   white-space: nowrap;
@@ -292,22 +290,18 @@ input[type="text"] {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
 }
 
-/* Tabs with weight: the live one is a raised tile capped by the club colour. */
+/* Four groups, not fifteen tabs. The live group is a raised tile capped by the club colour. */
 .nav {
   display: flex;
   gap: 3px;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
   padding: 2px;
   background: var(--bg-deep);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
 }
-.nav::-webkit-scrollbar {
-  display: none;
-}
-.nav button {
+.nav > button,
+.nav .nav-trigger {
   flex: 0 0 auto;
   position: relative;
   background: transparent;
@@ -320,18 +314,21 @@ input[type="text"] {
   letter-spacing: 0.005em;
   box-shadow: none;
 }
-.nav button:hover:not(:disabled) {
+.nav > button:hover:not(:disabled),
+.nav .nav-trigger:hover:not(:disabled) {
   color: var(--ink);
   background: var(--row-hover);
   border-color: transparent;
 }
-.nav button[aria-current="true"] {
+.nav > button[aria-current="true"],
+.nav .nav-trigger[aria-current="true"] {
   color: var(--ink);
   background: linear-gradient(var(--sheen), transparent) var(--panel-2);
   border-color: var(--line);
   box-shadow: var(--shadow-1);
 }
-.nav button[aria-current="true"]::after {
+.nav > button[aria-current="true"]::after,
+.nav .nav-trigger[aria-current="true"]::after {
   content: "";
   position: absolute;
   left: 9px;
@@ -340,6 +337,83 @@ input[type="text"] {
   height: 2px;
   border-radius: 2px;
   background: var(--team-pri);
+}
+.nav .caret,
+.nav-menu .caret {
+  margin-left: 5px;
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.nav-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+.nav-drop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 196px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  z-index: 20;
+  display: grid;
+  gap: 1px;
+}
+.nav-drop button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  padding: 7px 10px;
+  font-weight: 500;
+  font-size: 13px;
+  box-shadow: none;
+}
+.nav-drop button:hover {
+  background: var(--row-hover);
+}
+.nav-drop button[aria-current="true"] {
+  background: var(--accent-soft);
+}
+.nav-drop kbd {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink-faint);
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  padding: 0 5px;
+  line-height: 16px;
+}
+
+/* Save sits outside the tab rail, same menu chrome. */
+.topbar > .nav-menu .nav-trigger {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-dim);
+  padding: 5px 10px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.topbar > .nav-menu .nav-trigger:hover {
+  color: var(--ink);
+  background: var(--row-hover);
+}
+.topbar > .nav-menu .nav-drop {
+  left: auto;
+  right: 0;
 }
 
 .topbar .spacer {
@@ -391,11 +465,9 @@ input[type="text"] {
   .topbar .brand span {
     display: none;
   }
-  .topbar .nav button {
+  .topbar .nav > button,
+  .topbar .nav .nav-trigger {
     padding: 5px 8px;
-  }
-  .topbar > button {
-    padding: 6px 9px;
   }
 }
 /* Under a laptop there is no width left to squeeze: the tabs take a row of their own rather than

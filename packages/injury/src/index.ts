@@ -115,11 +115,17 @@ export function injuryOutlook(
   age: number,
   yearsPro: number,
   lastGp?: number,
+  minutesPerGame = 30,
 ): string {
   if (lastGp !== undefined && lastGp < 40)
     return `Missed most of last year (${lastGp} games). Treat him as an injury candidate.`
-  const risk = injuryChance(durability, age, 30, 1, yearsPro)
+  const mpg = minutesPerGame
+  const risk = injuryChance(durability, age, mpg, 1, yearsPro)
+  const atThirty = injuryChance(durability, age, 30, 1, yearsPro)
   const avg = injuryChance(50, 27, 30, 1, 0)
+  if (mpg > 0 && mpg <= 24 && atThirty > risk * 1.1) {
+    return `On ${Math.round(mpg)} minutes the load is light. At ${age} that is a managed night, not a pounding.`
+  }
   if (durability >= 80 && risk <= avg)
     return yearsPro <= 1
       ? 'No injury history in the book yet. Looks like an iron man.'

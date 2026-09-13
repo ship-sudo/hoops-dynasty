@@ -88,6 +88,22 @@ export function taxBill(
   return Math.round(bill)
 }
 
+/**
+ * Whether this club is a tax repeater this year. `paidYearEnds` are the seasons it was actually
+ * billed (bill > 0), not merely over the line on opening night.
+ */
+export function isTaxRepeater(
+  paidYearEnds: readonly number[],
+  yearEnd: number,
+  rule: 'all_3_prior' | '3_of_4_prior' | null | undefined,
+): boolean {
+  if (!rule) return false
+  const paid = new Set(paidYearEnds)
+  if (rule === 'all_3_prior')
+    return [yearEnd - 1, yearEnd - 2, yearEnd - 3].every((y) => paid.has(y))
+  return [yearEnd - 1, yearEnd - 2, yearEnd - 3, yearEnd - 4].filter((y) => paid.has(y)).length >= 3
+}
+
 /** The biggest first-year salary this team can offer a free agent, given its situation. */
 export function maxOfferFor(
   salaries: readonly RosterSalary[],

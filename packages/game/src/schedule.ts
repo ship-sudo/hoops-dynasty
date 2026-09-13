@@ -17,6 +17,7 @@
 // division-heavy weighting are right; the exact meeting counts are not.
 
 import type { Rng } from '@hoops/core'
+import { allStarDate, isAllStarRestDay } from './allstar.ts'
 import { addDays, daysBetween } from './dates.ts'
 import type { LeagueTeam, ScheduledGame } from './state.ts'
 
@@ -170,8 +171,13 @@ export function assignDates(
   let placed = 0
   let day = 0
   const lastPlayed = new Map<string, number>()
+  const breakDate = allStarDate(start, end)
   while (placed < remaining.length) {
     const date = addDays(start, day)
+    if (breakDate && isAllStarRestDay(date, breakDate)) {
+      day++
+      continue
+    }
     const busy = new Set<string>()
     let onThisDay = 0
     // Pass 1 wants a rest day for both teams; pass 2 takes anything legal.

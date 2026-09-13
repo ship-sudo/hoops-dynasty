@@ -28,8 +28,9 @@ import {
 import { ERA, ERA_FIRST, ERA_LAST } from '@hoops/data/era'
 import { classFor, fictionalClass, NameBank, scout } from '@hoops/draftclass'
 import { simulateGame } from '@hoops/engine'
-import { salariesFor } from '@hoops/frontoffice'
+import { maxSalary, minSalary, salariesFor } from '@hoops/frontoffice'
 import {
+  allStarDate,
   askingMultiplier,
   type Conference,
   candidates,
@@ -46,8 +47,10 @@ import {
   moodLabel,
   moraleOf,
   moraleTarget,
+  moraleValue,
   onTheClock,
   openDraft,
+  pickAllStars,
   ROLE_MINUTES,
   rolloverBegin,
   rolloverFinish,
@@ -79,6 +82,7 @@ import type {
   NewsItem,
   OffseasonState,
   PlayedGame,
+  PlayerDesk,
   PlayerMood,
   PlayoffPreview,
   PostseasonSummary,
@@ -100,10 +104,13 @@ import type {
 import { ratingCard } from './card.ts'
 import {
   askingFrom,
+  askingToStay,
   backfillPool,
+  extendPlayer,
   freeAgentPool,
   type Potentials,
   runMarket,
+  seasonTaxBills,
   signRookies,
   type UserOffer,
 } from './market.ts'
@@ -159,11 +166,6 @@ function emptyTotals(): SeasonTotals {
     tov: 0,
     pf: 0,
   }
-}
-
-/** A neutral rating set, for the rare case where an All-Star's record cannot be found. */
-function flatish(): PlayerRecord['ratings'] {
-  return Object.fromEntries(RATING_KEYS.map((k) => [k, 60])) as unknown as PlayerRecord['ratings']
 }
 
 /** Rebuild something PlayerRecord-shaped for the UI, using the bundle for bio the save dropped. */
@@ -313,7 +315,7 @@ function buildHooks(
     /**
      * The league moves through real CBAs as the years pass. Without this the rules froze at
      * whatever season you started in: a 2016 save was still playing a $70M cap with no play-in
-     * tournament in 2022, and the aprons never arrived. The era table runs 1998-2026; past its
+     * tournament in 2022, and the aprons never arrived. The era table runs 1998-2027; past its
      * end the last real season's rules stand and only the money grows (DECISIONS, 2026-09-11).
      */
     nextSeason: (yearEnd) => {
@@ -809,8 +811,6 @@ function dynastyOf(
   // structured log — phase and league events — so a user who simmed a week saw "opening night"
   // and nothing else until the playoffs arrived all at once.
   const feed: NewsItem[] = []
-  // The All-Star game is played once per season, the first time the calendar passes the break.
-  const allStarResults = new Map<number, AllStarGame['result']>()
   // The date the beat writers last filed, so the league talks about itself once a week.
   let lastRumourDate = ''
   // Offers the user has placed in the market, resolved when the summer is settled.
@@ -1045,14 +1045,74 @@ function dynastyOf(
       squad.map((p) => ({ playerId: p.playerId, contract: p.contract })),
       yearEnd,
     )
+    const payrollAmt = salaries.reduce((t, x) => (x.kind === 'two_way' ? t : t + x.amount), 0)
+    const bills = seasonTaxBills(current, yearEnd)
+    const mine = bills.find((b) => b.teamId === teamId)
     return {
       teamId,
-      payroll: salaries.reduce((t, x) => (x.kind === 'two_way' ? t : t + x.amount), 0),
+      payroll: payrollAmt,
       cap: rules.cap,
       taxLine: rules.tax_line ?? rules.cap,
       apron1: rules.apron_1,
       apron2: rules.apron_2,
       roster: squad.length,
+      taxBill: mine?.bill ?? 0,
+      repeater: mine?.repeater ?? false,
+    }
+  }
+
+  const listedOf = (): string[] => {
+    const mine = new Set(
+      current.league.players.filter((p) => p.teamId === current.userTeamId).map((p) => p.playerId),
+    )
+    return (current.listed ?? []).filter((id) => mine.has(id))
+  }
+
+  const deskOf = (playerId: string): PlayerDesk | null => {
+    const p = current.league.players.find((x) => x.playerId === playerId)
+    if (!p) return null
+    const yours = p.teamId === current.userTeamId
+    const listed = yours && listedOf().includes(playerId)
+    const offers = listed
+      ? incomingOffers(
+          current,
+          potentials,
+          makeRng(current.seed ^ current.calendar.results.length ^ playerId.length),
+          6,
+          playerId,
+        )
+      : []
+    const names: Record<string, string> = {}
+    for (const o of offers) {
+      for (const id of [...o.user.players, ...o.other.players]) {
+        const n = current.league.players.find((x) => x.playerId === id)?.name
+        if (n) names[id] = n
+      }
+    }
+    const rules = current.season.rules
+    const yearEnd = current.season.yearEnd
+    const remaining = p.contract?.years.filter((y) => y.yearEnd >= yearEnd) ?? []
+    const hasNext = p.contract?.years.some((y) => y.yearEnd === yearEnd + 1) ?? false
+    const out = wantsOut(moraleValue(current, playerId))
+    const ask = askingToStay(current, p, potentials)
+    let kind: PlayerDesk['contract']['kind'] = 'none'
+    if (yours && marketOpen && !hasNext) kind = 'fa'
+    else if (yours && remaining.length > 0 && remaining.length < 5) kind = 'extend'
+    return {
+      playerId,
+      yours,
+      listed,
+      offers,
+      names,
+      contract: {
+        kind: out && kind !== 'none' ? 'none' : kind,
+        asking: ask.amount,
+        askingYears: ask.years,
+        max: maxSalary(rules, p.yearsPro),
+        min: minSalary(rules, p.yearsPro),
+        offer: userOffers.get(playerId) ?? null,
+        reason: out ? 'He will not re-sign here, whatever you offer.' : null,
+      },
     }
   }
 
@@ -1374,6 +1434,7 @@ function dynastyOf(
               p.age,
               p.yearsPro,
               careerOf(current, p.playerId)?.seasons.at(-1)?.gp,
+              current.teamSettings[teamId]?.minutes[p.playerId],
             ),
           }
         })
@@ -1496,8 +1557,7 @@ function dynastyOf(
       const lineup = plan.lineup
         ? Object.fromEntries(Object.entries(plan.lineup).filter(([, id]) => !!id))
         : (existing.lineup ?? {})
-      const lineups =
-        plan.lineups !== undefined ? normaliseLineups(plan.lineups) : existing.lineups
+      const lineups = plan.lineups !== undefined ? normaliseLineups(plan.lineups) : existing.lineups
       // The same for instructions: a neutral instruction is simply dropped, so a plan the manager
       // has reset is stored as nothing at all and the save stays small.
       const instructions = plan.instructions
@@ -1551,6 +1611,25 @@ function dynastyOf(
         makeRng(current.seed ^ current.calendar.results.length),
         limit,
       ),
+
+    listedOnBlock: () => listedOf(),
+
+    listOnBlock(playerId, on): PlayerDesk | null {
+      const p = current.league.players.find((x) => x.playerId === playerId)
+      if (!p || p.teamId !== current.userTeamId) return deskOf(playerId)
+      const next = new Set(listedOf())
+      if (on) next.add(playerId)
+      else next.delete(playerId)
+      current.listed = [...next]
+      return deskOf(playerId)
+    },
+
+    playerDesk: (playerId) => deskOf(playerId),
+
+    extendContract(playerId, amount, years) {
+      const res = extendPlayer(current, playerId, amount, years, potentials)
+      return { ...res, desk: deskOf(playerId) }
+    },
 
     picksOf: (teamId: string) => picksOf(current, teamId),
 
@@ -1833,121 +1912,56 @@ function dynastyOf(
 
     allStars(): AllStarGame | null {
       const schedule = current.calendar.schedule
-      if (schedule.length === 0) return null
-      // Mid-February, where the real break is. The schedule's midpoint lands in early January,
-      // which is nobody's All-Star weekend.
-      const first = schedule[0]?.date ?? current.calendar.date
-      const breakYear = Number(first.slice(0, 4)) + (Number(first.slice(5, 7)) >= 8 ? 1 : 0)
-      const target = `${breakYear}-02-15`
-      const last = schedule.at(-1)?.date ?? target
+      const first = schedule[0]?.date
+      const last = schedule.at(-1)?.date
+      if (!first || !last) return null
+      const stored = current.allStar
       const date =
-        target > last ? (schedule[Math.floor(schedule.length / 2)]?.date ?? target) : target
-      const played = current.calendar.date >= date
-      const race = scoreCandidates(60)
-      const byId = new Map(current.league.players.map((p) => [p.playerId, p]))
-      const confOf = (teamId: string) =>
-        current.league.teams.find((t) => t.teamId === teamId)?.conference ?? 'East'
+        stored?.yearEnd === current.season.yearEnd ? stored.date : allStarDate(first, last)
+      if (!date) return null
 
-      const pick = (conference: 'East' | 'West'): AllStarPick[] =>
-        race.mvp
-          .filter((c) => confOf(c.teamId) === conference)
-          .slice(0, 12)
-          .map((c, i) => ({
-            playerId: c.playerId,
-            name: c.name,
-            teamId: c.teamId,
-            pos: byId.get(c.playerId)?.pos ?? 'SF',
-            starter: i < 5,
-            pts: c.pts,
-            reb: c.reb,
-            ast: c.ast,
+      const byId = new Map(current.league.players.map((p) => [p.playerId, p]))
+      const hydrate = (picks: { playerId: string; starter: boolean }[]): AllStarPick[] =>
+        picks.map((sel) => {
+          const p = byId.get(sel.playerId)
+          const s = current.stats[sel.playerId]
+          const gp = s && s.gp > 0 ? s.gp : 1
+          return {
+            playerId: sel.playerId,
+            name: p?.name ?? sel.playerId,
+            teamId: p?.teamId ?? '',
+            pos: p?.pos ?? 'SF',
+            starter: sel.starter,
+            pts: s ? s.pts / gp : 0,
+            reb: s ? (s.oreb + s.dreb) / gp : 0,
+            ast: s ? s.ast / gp : 0,
             selections:
               1 +
               current.history.filter((h) =>
-                h.awards?.allNba?.some((team) => team.some((w) => w.playerId === c.playerId)),
+                h.awards?.allNba?.some((team) => team.some((w) => w.playerId === sel.playerId)),
               ).length,
-          }))
-
-      const east = pick('East')
-      const west = pick('West')
-      const yearEnd = current.season.yearEnd
-
-      // Play it once, the first time anyone looks after the break. It is an exhibition: the
-      // starters play most of it, nobody defends very hard, and the scoreboard says so.
-      if (played && !allStarResults.has(yearEnd) && east.length >= 8 && west.length >= 8) {
-        const squad = (picks: AllStarPick[], teamId: string) => ({
-          teamId,
-          name: teamId,
-          players: picks.map((sel, i) => {
-            const p = current.league.players.find((x) => x.playerId === sel.playerId)
-            return {
-              playerId: sel.playerId,
-              name: sel.name,
-              pos: sel.pos as PlayerRecord['pos'],
-              heightIn: p?.heightIn ?? 79,
-              weightLb: p?.weightLb ?? 215,
-              age: p?.age ?? 27,
-              ratings: p?.ratings ?? flatish(),
-              tendencies: p?.tendencies ?? {
-                usage: 0.2,
-                shotRim: 0.3,
-                shotClose: 0.15,
-                shotMid: 0.3,
-                shotThree: 0.25,
-                assist: 0.15,
-                postUp: 0.1,
-              },
-              minutesTarget: i < 5 ? 28 : 20,
-              starter: i < 5,
-              condition: 1,
-            }
-          }),
-          // Nobody guards anyone at the All-Star game, and everybody shoots.
-          tactics: {
-            pace: 1 as const,
-            threes: 1 as const,
-            crashGlass: -1 as const,
-            pressure: -1 as const,
-            zone: false,
-          },
+          }
         })
-        const result = simulateGame(
-          {
-            era: current.season.era,
-            home: squad(east, 'EAST'),
-            away: squad(west, 'WEST'),
-            seasonType: 'regular',
-            neutralSite: true,
-          },
-          (current.seed ^ yearEnd) >>> 0,
-        )
-        // The MVP is the best line on the winning side, the way the vote usually goes.
-        const winners = result.home.pts >= result.away.pts ? result.home : result.away
-        let mvp = winners.players[0] ?? null
-        for (const line of winners.players) {
-          const score = (l: typeof line) => l.pts + 1.2 * (l.oreb + l.dreb) + 1.5 * l.ast
-          if (mvp && score(line) > score(mvp)) mvp = line
+
+      if (stored?.yearEnd === current.season.yearEnd) {
+        return {
+          yearEnd: current.season.yearEnd,
+          played: stored.result != null,
+          date: stored.date,
+          east: hydrate(stored.east),
+          west: hydrate(stored.west),
+          result: stored.result,
         }
-        allStarResults.set(yearEnd, {
-          eastPts: result.home.pts,
-          westPts: result.away.pts,
-          mvpPlayerId: mvp?.playerId ?? null,
-        })
-        current.log.push({
-          date,
-          yearEnd,
-          kind: 'note',
-          text: `All-Star Game: ${result.home.pts > result.away.pts ? 'East' : 'West'} win ${Math.max(result.home.pts, result.away.pts)}-${Math.min(result.home.pts, result.away.pts)}${mvp ? `, ${mvp.name} takes MVP with ${mvp.pts}` : ''}`,
-        })
       }
 
+      const live = pickAllStars(current)
       return {
-        yearEnd,
-        played,
+        yearEnd: current.season.yearEnd,
+        played: false,
         date,
-        east,
-        west,
-        result: allStarResults.get(yearEnd) ?? null,
+        east: hydrate(live.east),
+        west: hydrate(live.west),
+        result: null,
       }
     },
 

@@ -3,6 +3,7 @@
 // Run: npx tsx packages/data/src/open/download.ts
 
 import { cachedFetch, cachePath, isCached } from '../fetch.ts'
+import { currentContractsCached, ensureCurrentContracts } from './contracts-current.ts'
 
 export const GITHUB_SOURCE = 'github'
 
@@ -86,6 +87,16 @@ export async function downloadAll(): Promise<void> {
     const body = await fetchCsv(c)
     const lines = body.split('\n').length - 1
     console.log(`${had ? 'cached ' : 'fetched'} ${cacheKey(c)} ${body.length} bytes ${lines} lines`)
+  }
+  try {
+    const had = currentContractsCached()
+    const page = await ensureCurrentContracts()
+    console.log(
+      `${had ? 'cached ' : 'fetched'} bref/contracts-players.html y1=${page.columns.y1} ${page.rows.length} rows`,
+    )
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e)
+    console.log(`bref/contracts-players.html SKIP ${reason.slice(0, 200)}`)
   }
   console.log(`cache dir: ${cachePath(GITHUB_SOURCE, 'sumitrodatta')}`)
 }
