@@ -13,6 +13,7 @@ import {
   hintWeight,
   maxMinutes,
   onFloorFor,
+  restReason,
   shareMinutes,
 } from './rotation.ts'
 import { fitPlayer, type GameState, type LeaguePlayer, type TeamSettings } from './state.ts'
@@ -107,14 +108,44 @@ test('an injured man does not dress, and the fit ones absorb his minutes', () =>
   assert.ok(Math.abs(input.players.reduce((a, p) => a + p.minutesTarget, 0) - 240) < 0.01)
 })
 
-test('eight men dress even when the treatment table is full', () => {
+test('an out man never dresses, even when the bench is thin', () => {
   const state = newGame(fixtureBundle({ yearEnd: 2016 }), 'T00', 1)
   const roster = squad(state)
-  const availability = Object.fromEntries(
-    roster.slice(0, roster.length - 3).map((p) => [p.playerId, { ...fitPlayer(), out: 5 }]),
-  )
+  const hurt = roster.slice(0, roster.length - 3)
+  const availability = Object.fromEntries(hurt.map((p) => [p.playerId, { ...fitPlayer(), out: 5 }]))
   const dressed = chooseSquad(roster, { yearEnd: 2016, availability })
-  assert.ok(dressed.length >= 8, `the engine needs eight bodies, got ${dressed.length}`)
+  assert.equal(dressed.length, 3)
+  for (const p of hurt) {
+    assert.ok(
+      !dressed.some((d) => d.playerId === p.playerId),
+      `${p.name} is Out and cannot suit up`,
+    )
+  }
+  const input = buildTeamInput(team(state), roster, false, undefined, {
+    yearEnd: 2016,
+    availability,
+  })
+  assert.equal(input.players.length, 3)
+  for (const p of hurt) {
+    assert.ok(!input.players.some((d) => d.playerId === p.playerId))
+  }
+})
+
+test('at most twelve men suit up', () => {
+  const state = newGame(fixtureBundle({ yearEnd: 2016 }), 'T00', 1)
+  const t = team(state)
+  const roster = squad(state)
+  const extras: LeaguePlayer[] = roster.slice(0, 4).map((p, i) => ({
+    ...p,
+    playerId: `extra-${i}`,
+    name: `Extra ${i}`,
+  }))
+  const fat = [...roster, ...extras]
+  const dressed = chooseSquad(fat, { yearEnd: 2016 })
+  assert.equal(dressed.length, 12)
+  const input = buildTeamInput(t, fat, false, undefined, { yearEnd: 2016 })
+  assert.equal(input.players.length, 12)
+  assert.ok(Math.abs(input.players.reduce((a, p) => a + p.minutesTarget, 0) - 240) < 0.01)
 })
 
 test('condition reaches the engine instead of a hardcoded 1', () => {
@@ -313,4 +344,45 @@ test('named units: no lineups means the old minutes-share path, digit for digit'
     blowout && blowout.every((id) => !stars.has(id)),
     'a blowout sits the starting five',
   )
+})
+
+test('load management sits a back-to-back, and sitNext is one night only', () => {
+  const state = newGame(fixtureBundle({ yearEnd: 2016 }), 'T00', 1)
+  const roster = squad(state)
+  const star = roster[0] as LeaguePlayer
+  const settings: TeamSettings = {
+    tactics: { pace: 0, threes: 0, crashGlass: 0, pressure: 0, zone: false },
+    depth: [],
+    minutes: {},
+    inactive: [],
+    rest: { [star.playerId]: 'b2b' },
+  }
+  const availability = {
+    [star.playerId]: { ...fitPlayer(), lastGame: '2016-01-10' },
+  }
+  const b2b = buildTeamInput(team(state), roster, false, settings, {
+    yearEnd: 2016,
+    availability,
+    date: '2016-01-11',
+  })
+  assert.ok(
+    !b2b.players.some((p) => p.playerId === star.playerId),
+    'he sits the second night',
+  )
+  assert.equal(restReason(star.playerId, settings, { yearEnd: 2016, availability, date: '2016-01-11' }), 'b2b')
+  const rest = buildTeamInput(team(state), roster, false, settings, {
+    yearEnd: 2016,
+    availability,
+    date: '2016-01-13',
+  })
+  assert.ok(
+    rest.players.some((p) => p.playerId === star.playerId),
+    'two days off and he dresses',
+  )
+  const oneNight: TeamSettings = { ...settings, rest: undefined, sitNext: [star.playerId] }
+  const sat = buildTeamInput(team(state), roster, false, oneNight, {
+    yearEnd: 2016,
+    date: '2016-01-13',
+  })
+  assert.ok(!sat.players.some((p) => p.playerId === star.playerId), 'sit tonight holds him out')
 })

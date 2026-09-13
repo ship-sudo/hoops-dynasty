@@ -43,3 +43,21 @@ test('cap keeps the most-used players and drops the rest', () => {
   assert.deepEqual(dropped.map((d) => d.playerId).sort(), ['p20', 'p21', 'r'])
   assert.ok(entries.every((e) => e.playerId !== 'r'))
 })
+
+test('preseason zeros keep last-year minutes and last summer’s draftee, not low ids', () => {
+  const ids = ['1640001', '1640002', '2544', '203954', '1642889']
+  const rosters = ids.map((playerId) => ({ playerId, teamId: 'PHI' }))
+  const weight = new Map([
+    ['2544', 1988],
+    ['203954', 1197],
+    ['1642889', 1_000_000 - 22 * 1000],
+    ['1640001', 0],
+    ['1640002', 0],
+  ])
+  const { entries, dropped } = openingNightRosters([], rosters, 3, weight)
+  assert.deepEqual(
+    entries.map((e) => e.playerId).sort(),
+    ['1642889', '203954', '2544'].sort(),
+  )
+  assert.ok(dropped.some((d) => d.playerId === '1640001'))
+})

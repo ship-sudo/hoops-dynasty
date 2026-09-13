@@ -6,7 +6,13 @@ export {
   isAllStarRestDay,
   pickAllStars,
 } from './allstar.ts'
-export { type Cand, candidates, computeAwards } from './awards.ts'
+export {
+  applyFinalsHonors,
+  type Cand,
+  candidates,
+  computeAwards,
+  computeFinalsHonors,
+} from './awards.ts'
 export { addDays, addYears, daysBetween } from './dates.ts'
 export {
   lotteryTeams,
@@ -116,6 +122,8 @@ export {
   buildTeamInput,
   chooseSquad,
   depthScore,
+  DRESS_MAX,
+  DRESS_MIN,
   fillFive,
   hintWeight,
   lineupOrder,
@@ -125,6 +133,7 @@ export {
   overallOf,
   type RotationOptions,
   resolveUnits,
+  restReason,
   shareMinutes,
   slotOf,
 } from './rotation.ts'
@@ -138,6 +147,14 @@ export {
   simSeason,
   simToDate,
 } from './sim.ts'
+export {
+  autoAdjustSettings,
+  coverInjured,
+  dropFromRoster,
+  markInjuryCover,
+  restoreInjuryCover,
+  uncoverReturned,
+} from './sit.ts'
 export {
   askingSalary,
   type Coach,

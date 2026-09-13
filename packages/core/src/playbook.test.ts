@@ -14,6 +14,7 @@ import {
   NEUTRAL_INSTRUCTION,
   nightlyLoad,
   normaliseInstruction,
+  normaliseUnitTactics,
   OFFENSE_SYSTEM_IDS,
   outOfPosition,
   type PlayerInstruction,
@@ -23,10 +24,10 @@ import {
   type RolePlayer,
   suggestPresets,
   systemFit,
-  unitForSituation,
   systemTactics,
   systemTendencies,
   type Tendencies,
+  unitForSituation,
 } from './index.ts'
 
 function ratings(o: Partial<Ratings> = {}): Ratings {
@@ -429,5 +430,17 @@ describe('named units pick a group from the clock and the score', () => {
       'closing',
       'a close game still closes, even on a back-to-back',
     )
+  })
+})
+
+describe('unit tactics', () => {
+  it('empty and missing both store as nothing', () => {
+    assert.equal(normaliseUnitTactics(undefined), undefined)
+    assert.equal(normaliseUnitTactics({}), undefined)
+  })
+
+  it('keeps a second unit that lights it up', () => {
+    const got = normaliseUnitTactics({ bench: { pace: 1, threes: 1 } })
+    assert.deepEqual(got, { bench: { pace: 1, threes: 1 } })
   })
 })

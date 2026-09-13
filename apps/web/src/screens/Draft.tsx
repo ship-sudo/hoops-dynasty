@@ -1,6 +1,7 @@
 import type { RATING_KEYS } from '@hoops/core'
 import { useEffect, useMemo, useState } from 'react'
 import type { OffseasonState, ScoutedView } from '../sim/api.ts'
+import { display } from '../sim/card.ts'
 import { useStore } from '../store.tsx'
 import { Panel, RatingBar, TeamChip } from '../ui/bits.tsx'
 import { type Column, DataTable } from '../ui/DataTable.tsx'
@@ -301,7 +302,7 @@ export function Draft({ off, act, working, me }: PhaseProps) {
                       <RatingBar
                         key={k}
                         label={RATING_LABELS[k]}
-                        value={selected.ratings[k] ?? 0}
+                        value={display(selected.ratings[k] ?? 0)}
                       />
                     ))}
                   </div>

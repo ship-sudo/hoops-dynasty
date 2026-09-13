@@ -123,6 +123,11 @@ export interface TeamGameInput {
    * save that never opened the screen produces a byte-identical input.
    */
   units?: RotationUnits
+  /**
+   * How each named five plays. Missing, or missing a unit, means that group uses team tactics.
+   * Optional so old inputs and the calibration path stay byte-identical.
+   */
+  unitStyle?: Partial<Record<'starters' | 'bench' | 'closing', Pick<Tactics, 'pace' | 'threes'>>>
 }
 
 /** League baselines the engine must reproduce for an average-vs-average game in that season. */

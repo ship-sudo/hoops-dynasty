@@ -33,6 +33,14 @@ test('simDays stops at the All-Star break, then continues, then wraps the season
   if (breakHit.interrupt?.kind !== 'allstar') return
   assert.equal(breakHit.interrupt.date, '2020-02-15')
   assert.ok(breakHit.state.allStar?.result)
+  const asBox = breakHit.state.allStar?.result?.box
+  assert.ok((asBox?.home.players.length ?? 0) >= 8)
+  assert.ok((asBox?.away.players.length ?? 0) >= 8)
+  assert.equal(asBox?.home.pts, breakHit.state.allStar?.result?.eastPts)
+  assert.equal(asBox?.away.pts, breakHit.state.allStar?.result?.westPts)
+  assert.equal(asBox?.pbp.length, 0)
+  const roundTrip = JSON.parse(JSON.stringify(breakHit.state)) as typeof breakHit.state
+  assert.ok(roundTrip.allStar?.result?.box?.home.players[0]?.name)
   assert.ok(
     (breakHit.state.allStar?.result?.eastPts ?? 0) > 60 &&
       (breakHit.state.allStar?.result?.westPts ?? 0) > 60,

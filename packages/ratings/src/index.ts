@@ -123,13 +123,73 @@ export function relativeProxies(
   return out
 }
 
-function toRatings(
-  raw: Record<ProxyKey, number | null>,
-  leagueMean: Record<ProxyKey, number>,
-  anchors: Anchors,
+/**
+ * Era-relative proxies for every player in one season. Each value is raw ÷ that season's
+ * minutes-weighted league mean, so a 36% shooter in 1999 and a 40% shooter in 2024 can be blended.
+ */
+export function relativeSeason(inputs: RateInput[]): Map<string, Record<ProxyKey, number | null>> {
+  const seasonGames = Math.max(50, ...inputs.map((i) => i.stats?.gp ?? 0))
+  const proxyInputs: ProxyInput[] = inputs.map((i) => ({
+    playerId: i.playerId,
+    pos: i.pos,
+    age: i.age,
+    heightIn: i.heightIn,
+    weightLb: i.weightLb,
+    stats: i.stats,
+    teamGames: i.teamGames ?? seasonGames,
+  }))
+  const priors = leaguePriorsFrom(proxyInputs)
+  const raws = proxyInputs.map((p) => rawProxies(p, priors))
+  const leagueMean = meanByProxy(raws, proxyInputs)
+  const out = new Map<string, Record<ProxyKey, number | null>>()
+  for (let i = 0; i < proxyInputs.length; i++) {
+    const p = proxyInputs[i] as ProxyInput
+    out.set(p.playerId, relativeProxies(raws[i] as Record<ProxyKey, number | null>, leagueMean))
+  }
+  return out
+}
+
+export interface RelativeLayer {
+  relative: Record<ProxyKey, number | null>
+  minutes: number
+  recency: number
+}
+
+/**
+ * Minutes- and recency-weighted blend of era-relative proxies. A 16-game injury year does not
+ * overwrite two healthy seasons of being a good shooter.
+ */
+export function blendRelative(layers: readonly RelativeLayer[]): Record<ProxyKey, number | null> {
+  const out = {} as Record<ProxyKey, number | null>
+  for (const k of PROXY_KEYS) {
+    let num = 0
+    let den = 0
+    for (const layer of layers) {
+      const v = layer.relative[k]
+      const w = minuteWeight(layer.minutes) * Math.max(0, layer.recency)
+      if (v == null || !Number.isFinite(v) || w <= 0) continue
+      num += v * w
+      den += w
+    }
+    out[k] = den > 0 ? num / den : null
+  }
+  return out
+}
+
+/** How much evidence a stack of seasons is. Saturates at 1,500 blended minutes. */
+export function blendEvidence(layers: readonly RelativeLayer[]): number {
+  return clamp(
+    layers.reduce((s, l) => s + minuteWeight(l.minutes), 0),
+    0,
+    1,
+  )
+}
+
+export function ratingsFromRelative(
+  rel: Record<ProxyKey, number | null>,
   weight: number,
+  anchors: Anchors = ANCHORS,
 ): Ratings {
-  const rel = relativeProxies(raw, leagueMean)
   const ratings = {} as Ratings
   for (const k of RATING_KEYS) {
     const key = k as ProxyKey
@@ -140,11 +200,19 @@ function toRatings(
       continue
     }
     const z = (v - a.mean) / a.sd
-    // Thin seasons are pulled toward league average: a 200-minute year is not evidence of a star.
     const shrunk = z * Math.max(MIN_WEIGHT_FLOOR, weight)
     ratings[k] = clamp(zToRating(shrunk), 5, 99)
   }
   return ratings
+}
+
+function toRatings(
+  raw: Record<ProxyKey, number | null>,
+  leagueMean: Record<ProxyKey, number>,
+  anchors: Anchors,
+  weight: number,
+): Ratings {
+  return ratingsFromRelative(relativeProxies(raw, leagueMean), weight, anchors)
 }
 
 /** Tendencies straight from the real line. Falls back to a league-typical profile. */

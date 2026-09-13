@@ -15,6 +15,30 @@ import type { SaveFile } from './sim/api.ts'
 import { SimClient } from './sim/client.ts'
 import type { Progress, Snapshot } from './sim/protocol.ts'
 
+/** How a multi-day sim should feel. Play and season stay snappy; week/month/soft watch the days. */
+export type SimPace = 'play' | 'week' | 'month' | 'soft' | 'season'
+
+function reducedMotion(): boolean {
+  return typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function beatMs(pace: SimPace): number {
+  if (reducedMotion()) return 0
+  if (pace === 'week') return 1100
+  if (pace === 'month') return 850
+  if (pace === 'soft') return 2200
+  return 0
+}
+
+async function waitBeat(ms: number, skipped: () => boolean): Promise<void> {
+  if (ms <= 0 || skipped()) return
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    if (skipped()) return
+    await new Promise((r) => setTimeout(r, Math.min(80, end - Date.now())))
+  }
+}
+
 export type Screen =
   | 'home'
   | 'standings'
@@ -58,8 +82,11 @@ interface Store {
   setScreen: (s: Screen) => void
   startGame: (yearEnd: number, teamId: string, seed: number) => Promise<void>
   resume: (save: SaveFile) => Promise<void>
-  advance: (days: number) => Promise<void>
-  advanceTo: (date: string) => Promise<void>
+  advance: (days: number, pace?: SimPace) => Promise<void>
+  advanceTo: (date: string, pace?: SimPace) => Promise<void>
+  /** Finish a watching sim without waiting out the remaining beats. */
+  skipSim: () => void
+  setAutoLineup: (on: boolean) => Promise<void>
   /** Re-read the snapshot after something other than simming changed the game, and autosave. */
   refresh: () => Promise<void>
   quitToMenu: () => void
@@ -81,6 +108,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [hasAutosave, setHasAutosave] = useState(false)
   const [screen, setScreen] = useState<Screen>('home')
+  const skipRef = useRef(false)
 
   useEffect(() => {
     saves
@@ -145,9 +173,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const advance = useCallback(
-    async (days: number) => {
+    async (days: number, pace: SimPace = 'play') => {
+      const beat = beatMs(pace)
       await guard(days === 1 ? 'Simulating' : `Simulating ${days} days`, async () => {
-        setSnapshot(await client.simDays(days, setBusy))
+        if (days <= 1 || beat <= 0) {
+          setSnapshot(await client.simDays(days, setBusy))
+          await autosave()
+          return
+        }
+        skipRef.current = false
+        for (let i = 0; i < days; i++) {
+          if (skipRef.current) {
+            setSnapshot(await client.simDays(days - i, setBusy))
+            break
+          }
+          const snap = await client.simDays(1)
+          setSnapshot(snap)
+          setBusy({ done: i + 1, total: days, label: snap.state.date })
+          if (snap.lastDay?.interrupt || snap.state.seasonComplete) break
+          await waitBeat(beat, () => skipRef.current)
+        }
         await autosave()
       })
     },
@@ -155,13 +200,47 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const advanceTo = useCallback(
-    async (date: string) => {
+    async (date: string, pace: SimPace = 'play') => {
+      const beat = beatMs(pace)
       await guard('Simulating', async () => {
-        setSnapshot(await client.simToDate(date, setBusy))
+        if (beat <= 0) {
+          setSnapshot(await client.simToDate(date, setBusy))
+          await autosave()
+          return
+        }
+        skipRef.current = false
+        const from = snapshot?.state.date
+        const total = from
+          ? Math.max(1, Math.round((new Date(date).getTime() - new Date(from).getTime()) / 86400000))
+          : 30
+        for (let i = 0; i < 400; i++) {
+          if (skipRef.current) {
+            setSnapshot(await client.simToDate(date, setBusy))
+            break
+          }
+          const snap = await client.simDays(1)
+          setSnapshot(snap)
+          setBusy({ done: Math.min(i + 1, total), total, label: snap.state.date })
+          if (snap.lastDay?.interrupt || snap.state.seasonComplete || snap.state.date >= date) break
+          await waitBeat(beat, () => skipRef.current)
+        }
         await autosave()
       })
     },
-    [client, guard, autosave],
+    [client, guard, autosave, snapshot],
+  )
+
+  const skipSim = useCallback(() => {
+    skipRef.current = true
+  }, [])
+
+  const setAutoLineup = useCallback(
+    async (on: boolean) => {
+      await client.manager('setAutoLineup', on)
+      setSnapshot((s) => (s ? { ...s, state: { ...s.state, autoLineup: on } } : s))
+      await autosave()
+    },
+    [client, autosave],
   )
 
   // One refresh for every screen that changes the game without playing a day: a trade, a draft
@@ -187,6 +266,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       resume,
       advance,
       advanceTo,
+      skipSim,
+      setAutoLineup,
       refresh,
       quitToMenu: () => {
         setSnapshot(null)
@@ -208,6 +289,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       resume,
       advance,
       advanceTo,
+      skipSim,
+      setAutoLineup,
       refresh,
     ],
   )

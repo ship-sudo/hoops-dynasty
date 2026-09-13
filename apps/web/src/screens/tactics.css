@@ -46,6 +46,78 @@
   white-space: nowrap;
 }
 
+/* ── who's hurt, when they're back ────────────────────────────────────────── */
+
+.tc-trainer {
+  padding: 10px 12px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--loss);
+  border-radius: var(--radius);
+}
+
+.tc-trainer .hd {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.tc-trainer ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.tc-trainer li {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1.2fr) 2rem minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12.5px;
+}
+
+.tc-trainer .pos {
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.tc-trainer .why {
+  color: var(--ink-dim);
+}
+
+.tc-trainer .when {
+  font-weight: 650;
+  justify-self: end;
+  text-align: right;
+}
+
+.tc-trainer .badge {
+  margin: 0;
+  width: fit-content;
+}
+
+@media (max-width: 720px) {
+  .tc-trainer li {
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+  }
+  .tc-trainer .pos,
+  .tc-trainer .why {
+    display: none;
+  }
+  .tc-trainer .when {
+    grid-column: 2;
+    justify-self: start;
+    text-align: left;
+    font-weight: 500;
+    color: var(--ink-dim);
+  }
+}
+
 /* ── the starting five ────────────────────────────────────────────────────── */
 
 .tc-five {
@@ -156,6 +228,10 @@
 .tc-rota td,
 .tc-rota th {
   vertical-align: middle;
+}
+.tc-rota select {
+  max-width: 10em;
+  font-size: 12px;
 }
 .tc-rota tr.tc-open > td {
   border-bottom: 0;
@@ -393,8 +469,43 @@
   padding-top: 8px;
 }
 
+.tc-minstep {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.tc-minstep button {
+  width: 22px;
+  padding: 0;
+  min-width: 22px;
+  line-height: 20px;
+}
 .tc-minsel {
-  width: 56px;
+  width: 48px;
+  text-align: center;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+}
+.tc-minsel::-webkit-outer-spin-button,
+.tc-minsel::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.tc-unit-tabs {
+  margin-bottom: 2px;
+}
+.tc-unit-style {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.tc-unit-knobs {
+  display: grid;
+  gap: 10px;
 }
 
 /* What his shot mix actually becomes. The honest bit. */

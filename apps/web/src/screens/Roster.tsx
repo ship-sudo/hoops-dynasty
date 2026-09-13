@@ -1,12 +1,22 @@
-import { RATING_KEYS } from '@hoops/core'
+import type { RATING_KEYS } from '@hoops/core'
 import { useEffect, useMemo, useState } from 'react'
-import type { PlayerMood, RosterRow, SquadMoodView, TeamFinance } from '../sim/api.ts'
+import type {
+  FreeAgentView,
+  PlayerMood,
+  RosterRow,
+  SquadMoodView,
+  TeamFinance,
+} from '../sim/api.ts'
+import { display } from '../sim/card.ts'
 import { useStore } from '../store.tsx'
 import { Modal, Panel, RatingBar } from '../ui/bits.tsx'
 import { type Column, DataTable } from '../ui/DataTable.tsx'
-import { height, money, pct0, pct1, per, plainDate, seasonLabel } from '../ui/format.ts'
+import { height, money, n1, pct0, pct1, per, plainDate, seasonLabel } from '../ui/format.ts'
+import { InjuryMark } from '../ui/InjuryMark.tsx'
 import { PlayerCareer } from './Career.tsx'
 import { PlayerActions } from './PlayerActions.tsx'
+import { PlayerDossier } from './PlayerDossier.tsx'
+import { playoffTotals } from './playerDossier.ts'
 import './morale.css'
 
 /** The mood ramp is one class; the pill, the bar and the panel all read `--mr` off it. */
@@ -100,15 +110,14 @@ const GROUPS: [string, (typeof RATING_KEYS)[number][]][] = [
   ['Physical', ['speed', 'strength', 'stamina', 'durability']],
 ]
 
-const overall = (r: RosterRow) =>
-  RATING_KEYS.reduce((s, k) => s + r.player.ratings[k], 0) / RATING_KEYS.length
+const overall = (r: RosterRow) => r.card.overall
 
 function columns(): Column<RosterRow>[] {
   const rating = (key: (typeof RATING_KEYS)[number], header: string): Column<RosterRow> => ({
     id: key,
     header,
     accessorFn: (r) => r.player.ratings[key],
-    cell: (c) => Math.round(c.getValue<number>()),
+    cell: (c) => display(c.getValue<number>()),
     meta: { title: RATING_LABELS[key] },
   })
   return [
@@ -118,6 +127,36 @@ function columns(): Column<RosterRow>[] {
       accessorFn: (r) => r.player.name,
       meta: { text: true },
       size: 170,
+    },
+    {
+      id: 'health',
+      header: '',
+      accessorFn: (r) => r.injury?.name ?? '',
+      cell: (c) => <InjuryMark injury={c.row.original.injury} />,
+      meta: { text: true, title: 'Current injury' },
+      size: 52,
+    },
+    {
+      id: 'risk',
+      header: 'Risk',
+      accessorFn: (r) => r.injuryRisk?.gamesOut ?? 99,
+      cell: (c) => {
+        const risk = c.row.original.injuryRisk
+        if (!risk) return '—'
+        const tone =
+          risk.label === 'fragile' || risk.label === 'candidate'
+            ? 'warn'
+            : risk.label === 'iron'
+              ? 'win'
+              : 'dim'
+        return (
+          <span className={tone} title={risk.text}>
+            {risk.short}
+          </span>
+        )
+      },
+      meta: { title: 'Expected games missed to injury at this minutes load' },
+      size: 88,
     },
     { id: 'pos', header: 'Pos', accessorFn: (r) => r.player.pos, meta: { text: true } },
     { id: 'age', header: 'Age', accessorFn: (r) => r.player.age },
@@ -219,9 +258,11 @@ function columns(): Column<RosterRow>[] {
 export function CapLine({ finance }: { finance: TeamFinance }) {
   const hasTax = finance.taxLine > finance.cap
   const overCap = finance.payroll - finance.cap
+  const spots = `${finance.roster} of ${finance.rosterMax}`
   return (
     <span className="dim" style={{ textAlign: 'right' }}>
-      <span className="num">{finance.roster}</span> players · payroll{' '}
+      <span className="num">{spots}</span> on the roster ·{' '}
+      <span className="num">{finance.rosterActive}</span> dress · payroll{' '}
       <span className="num">{money(finance.payroll)}</span> against a{' '}
       <span className="num">{money(finance.cap || null)}</span> cap
       {hasTax ? (
@@ -232,6 +273,8 @@ export function CapLine({ finance }: { finance: TeamFinance }) {
       ) : null}
       <br />
       <span className="faint" style={{ fontSize: 11 }}>
+        {`Minimum ${finance.rosterMin}. ${finance.rosterActive} dress; the roster cap is ${finance.rosterMax}. `}
+        {finance.deadCap > 0 ? `${money(finance.deadCap)} dead cap from waivers. ` : ''}
         {overCap > 0
           ? `${money(overCap)} over the cap — allowed, because you can always re-sign your own men. `
           : `${money(-overCap)} of room under the cap. `}
@@ -256,13 +299,16 @@ function PlayerCard({
   onClose: () => void
   onCareer: (playerId: string) => void
 }) {
+  const { game } = useStore()
   const p = row.player
   const t = row.totals
+  const po = game ? playoffTotals(game.calendar.results, p.playerId) : null
   return (
     <Modal
       title={
         <span>
-          {p.name}{' '}
+          {p.name}
+          <InjuryMark injury={row.injury} />{' '}
           <span className="dim">
             · {p.pos} · {p.age} · {height(p.heightIn)}, {p.weightLb} lb
           </span>
@@ -270,210 +316,301 @@ function PlayerCard({
       }
       onClose={onClose}
     >
-      <div
-        style={{
-          padding: 12,
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0,1fr) 300px',
-          gap: 14,
-        }}
-      >
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            {GROUPS.map(([title, keys]) => (
-              <section key={title}>
-                <h3 style={{ marginBottom: 5 }}>{title}</h3>
-                <div className="ratings">
-                  {keys.map((k) => (
-                    <RatingBar key={k} label={RATING_LABELS[k]} value={p.ratings[k]} />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-
-          <section>
-            <div className="rowline" style={{ marginBottom: 5 }}>
-              <h3 style={{ margin: 0 }}>This season</h3>
-              <span style={{ flex: 1 }} />
-              <button type="button" className="ghost" onClick={() => onCareer(p.playerId)}>
-                Full career ▸
-              </button>
+      <div className="pc" style={{ padding: 12 }}>
+        <PlayerDossier playerId={p.playerId} row={row} />
+        <div className="pc-body">
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              {GROUPS.map(([title, keys]) => (
+                <section key={title}>
+                  <h3 style={{ marginBottom: 5 }}>{title}</h3>
+                  <div className="ratings">
+                    {keys.map((k) => (
+                      <RatingBar key={k} label={RATING_LABELS[k]} value={display(p.ratings[k])} />
+                    ))}
+                  </div>
+                </section>
+              ))}
             </div>
-            <table className="grid">
-              <thead>
-                <tr>
-                  <th>GP</th>
-                  <th>GS</th>
-                  <th>MPG</th>
-                  <th>PPG</th>
-                  <th>RPG</th>
-                  <th>APG</th>
-                  <th>SPG</th>
-                  <th>BPG</th>
-                  <th>TO</th>
-                  <th>FG%</th>
-                  <th>3P%</th>
-                  <th>FT%</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td className="num">{t.gp}</td>
-                  <td className="num">{t.gs}</td>
-                  <td className="num">{per(t.min, t.gp)}</td>
-                  <td className="num">{per(t.pts, t.gp)}</td>
-                  <td className="num">{per(t.oreb + t.dreb, t.gp)}</td>
-                  <td className="num">{per(t.ast, t.gp)}</td>
-                  <td className="num">{per(t.stl, t.gp)}</td>
-                  <td className="num">{per(t.blk, t.gp)}</td>
-                  <td className="num">{per(t.tov, t.gp)}</td>
-                  <td className="num">{t.fga ? pct1(t.fgm / t.fga) : '—'}</td>
-                  <td className="num">{t.fg3a ? pct1(t.fg3m / t.fg3a) : '—'}</td>
-                  <td className="num">{t.fta ? pct1(t.ftm / t.fta) : '—'}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-        </div>
 
-        <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
-          {row.mood ? (
-            <Panel
-              title={
-                <span>
-                  Dressing room{' '}
-                  <span
-                    className={`mr-label ${moodClass(row.mood.label)}`}
-                    style={{ fontSize: 13 }}
-                  >
-                    · {row.mood.label}
-                  </span>
-                </span>
-              }
-            >
-              <div className={moodClass(row.mood.label)}>
-                <p className="mr-why">{row.mood.why}</p>
-                <ul className="mr-terms">
-                  {row.mood.terms.map((t) => (
-                    <li key={t.key}>
-                      <span className={`d ${t.value < 0 ? 'neg' : 'pos'}`}>
-                        {t.value > 0 ? '+' : ''}
-                        {t.value.toFixed(0)}
-                      </span>
-                      <span>{t.text}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mr-gap">
-                  <span>
-                    role <b>{row.mood.role}</b>
-                  </span>
-                  <span>
-                    expects <b>{row.mood.expectedMpg}</b> mpg
-                  </span>
-                  <span>
-                    getting <b>{row.mood.mpg.toFixed(1)}</b>
-                  </span>
-                  <span>
-                    morale <b>{Math.round(row.mood.value)}</b>
-                  </span>
-                </div>
-                <p className="faint" style={{ fontSize: 11, marginTop: 8 }}>
-                  {row.mood.wantsOut
-                    ? 'He has made his mind up: he will not re-sign here, whatever you offer.'
-                    : row.mood.askingMultiple > 1.01
-                      ? `Re-signing him here would cost about ${Math.round((row.mood.askingMultiple - 1) * 100)}% over his market price. That premium is yours alone — he would sign elsewhere for the going rate.`
-                      : 'He would re-sign here at, or a little under, his market price.'}
-                </p>
+            <section>
+              <div className="rowline" style={{ marginBottom: 5 }}>
+                <h3 style={{ margin: 0 }}>This season</h3>
+                <span style={{ flex: 1 }} />
+                <button type="button" className="ghost" onClick={() => onCareer(p.playerId)}>
+                  Full career ▸
+                </button>
               </div>
-            </Panel>
-          ) : null}
-          <Panel title="Contract">
-            {p.contract ? (
               <table className="grid">
                 <thead>
                   <tr>
-                    <th className="text">Year</th>
-                    <th>Salary</th>
-                    <th className="text">Option</th>
+                    {po ? <th className="text" /> : null}
+                    <th>GP</th>
+                    <th>GS</th>
+                    <th>MPG</th>
+                    <th>PPG</th>
+                    <th>RPG</th>
+                    <th>APG</th>
+                    <th>SPG</th>
+                    <th>BPG</th>
+                    <th>TO</th>
+                    <th>FG%</th>
+                    <th>3P%</th>
+                    <th>FT%</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {p.contract.years.map((y) => (
-                    <tr key={y.yearEnd}>
-                      <td className="text">{seasonLabel(y.yearEnd)}</td>
-                      <td className="num">{money(y.amount)}</td>
-                      <td className="text dim">
-                        {y.option
-                          ? `${y.option.replace(/_/g, ' ')} option`
-                          : y.guaranteed
-                            ? 'guaranteed'
-                            : 'not guaranteed'}
-                      </td>
+                  <tr>
+                    {po ? <td className="text dim">RS</td> : null}
+                    <td className="num">{t.gp}</td>
+                    <td className="num">{t.gs}</td>
+                    <td className="num">{per(t.min, t.gp)}</td>
+                    <td className="num">{per(t.pts, t.gp)}</td>
+                    <td className="num">{per(t.oreb + t.dreb, t.gp)}</td>
+                    <td className="num">{per(t.ast, t.gp)}</td>
+                    <td className="num">{per(t.stl, t.gp)}</td>
+                    <td className="num">{per(t.blk, t.gp)}</td>
+                    <td className="num">{per(t.tov, t.gp)}</td>
+                    <td className="num">{t.fga ? pct1(t.fgm / t.fga) : '—'}</td>
+                    <td className="num">{t.fg3a ? pct1(t.fg3m / t.fg3a) : '—'}</td>
+                    <td className="num">{t.fta ? pct1(t.ftm / t.fta) : '—'}</td>
+                  </tr>
+                  {po ? (
+                    <tr>
+                      <td className="text">Playoffs</td>
+                      <td className="num">{po.gp}</td>
+                      <td className="num">—</td>
+                      <td className="num">{n1(po.min)}</td>
+                      <td className="num">{n1(po.pts)}</td>
+                      <td className="num">{n1(po.reb)}</td>
+                      <td className="num">{n1(po.ast)}</td>
+                      <td className="num">—</td>
+                      <td className="num">—</td>
+                      <td className="num">—</td>
+                      <td className="num">—</td>
+                      <td className="num">—</td>
+                      <td className="num">—</td>
                     </tr>
-                  ))}
+                  ) : null}
                 </tbody>
               </table>
-            ) : (
-              <p className="dim">
-                No contract on file for this player — he is on the roster but the season's salary
-                data does not cover him.
-              </p>
-            )}
-            {p.contract ? (
-              <p className="faint" style={{ fontSize: 11, marginTop: 6 }}>
-                A {p.contract.kind.replace(/_/g, ' ')} deal.{' '}
-                {p.contract.source === 'inferred'
-                  ? 'The exact terms are estimated: the real salary records for this season are incomplete.'
-                  : 'Terms taken from the real salary records.'}
-              </p>
+            </section>
+          </div>
+
+          <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
+            {row.mood ? (
+              <Panel
+                title={
+                  <span>
+                    Dressing room{' '}
+                    <span
+                      className={`mr-label ${moodClass(row.mood.label)}`}
+                      style={{ fontSize: 13 }}
+                    >
+                      · {row.mood.label}
+                    </span>
+                  </span>
+                }
+              >
+                <div className={moodClass(row.mood.label)}>
+                  <p className="mr-why">{row.mood.why}</p>
+                  <ul className="mr-terms">
+                    {row.mood.terms.map((t) => (
+                      <li key={t.key}>
+                        <span className={`d ${t.value < 0 ? 'neg' : 'pos'}`}>
+                          {t.value > 0 ? '+' : ''}
+                          {t.value.toFixed(0)}
+                        </span>
+                        <span>{t.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mr-gap">
+                    <span>
+                      role <b>{row.mood.role}</b>
+                    </span>
+                    <span>
+                      expects <b>{row.mood.expectedMpg}</b> mpg
+                    </span>
+                    <span>
+                      getting <b>{row.mood.mpg.toFixed(1)}</b>
+                    </span>
+                    <span>
+                      morale <b>{Math.round(row.mood.value)}</b>
+                    </span>
+                  </div>
+                  <p className="faint" style={{ fontSize: 11, marginTop: 8 }}>
+                    {row.mood.wantsOut
+                      ? 'He has made his mind up: he will not re-sign here, whatever you offer.'
+                      : row.mood.askingMultiple > 1.01
+                        ? `Re-signing him here would cost about ${Math.round((row.mood.askingMultiple - 1) * 100)}% over his market price. That premium is yours alone — he would sign elsewhere for the going rate.`
+                        : 'He would re-sign here at, or a little under, his market price.'}
+                  </p>
+                </div>
+              </Panel>
             ) : null}
-          </Panel>
+            <Panel title="Contract">
+              {p.contract ? (
+                <table className="grid">
+                  <thead>
+                    <tr>
+                      <th className="text">Year</th>
+                      <th>Salary</th>
+                      <th className="text">Option</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {p.contract.years.map((y) => (
+                      <tr key={y.yearEnd}>
+                        <td className="text">{seasonLabel(y.yearEnd)}</td>
+                        <td className="num">{money(y.amount)}</td>
+                        <td className="text dim">
+                          {y.option
+                            ? `${y.option.replace(/_/g, ' ')} option`
+                            : y.guaranteed
+                              ? 'guaranteed'
+                              : 'not guaranteed'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="dim">
+                  No contract on file for this player — he is on the roster but the season's salary
+                  data does not cover him.
+                </p>
+              )}
+              {p.contract ? (
+                <p className="faint" style={{ fontSize: 11, marginTop: 6 }}>
+                  A {p.contract.kind.replace(/_/g, ' ')} deal.{' '}
+                  {p.contract.source === 'inferred'
+                    ? 'The exact terms are estimated: the real salary records for this season are incomplete.'
+                    : 'Terms taken from the real salary records.'}
+                </p>
+              ) : null}
+            </Panel>
 
-          <PlayerActions playerId={p.playerId} onChanged={onClose} />
+            <PlayerActions playerId={p.playerId} onChanged={onClose} />
 
-          <Panel title="Bio">
-            <dl className="kv">
-              <dt>Born</dt>
-              <dd>{plainDate(p.birthDate)}</dd>
-              <dt>Drafted</dt>
-              <dd>
-                {p.draft
-                  ? `${p.draft.year} · round ${p.draft.round} · pick ${p.draft.pick}`
-                  : 'Undrafted'}
-              </dd>
-              <dt>Seasons played</dt>
-              <dd>{p.yearsPro}</dd>
-              <dt>Seasons here</dt>
-              <dd>{p.yearsWithTeam}</dd>
-              <dt>Availability</dt>
-              <dd>{row.injuryHint ?? '—'}</dd>
-              <dt title="Share of his team's possessions he finishes while on the floor">Usage</dt>
-              <dd>{pct0(p.tendencies.usage)}</dd>
-            </dl>
-            <div className="faint" style={{ fontSize: 11, marginTop: 8, marginBottom: 3 }}>
-              Where his shots come from
-            </div>
-            <dl className="kv">
-              <dt>At the rim</dt>
-              <dd>{pct0(p.tendencies.shotRim)}</dd>
-              <dt>Close range</dt>
-              <dd>{pct0(p.tendencies.shotClose)}</dd>
-              <dt>Mid-range</dt>
-              <dd>{pct0(p.tendencies.shotMid)}</dd>
-              <dt>Three-point</dt>
-              <dd>{pct0(p.tendencies.shotThree)}</dd>
-            </dl>
-          </Panel>
+            <Panel title="Bio">
+              <dl className="kv">
+                <dt>Born</dt>
+                <dd>{plainDate(p.birthDate)}</dd>
+                <dt>Drafted</dt>
+                <dd>
+                  {p.draft
+                    ? `${p.draft.year} · round ${p.draft.round} · pick ${p.draft.pick}`
+                    : 'Undrafted'}
+                </dd>
+                <dt>Seasons played</dt>
+                <dd>{p.yearsPro}</dd>
+                <dt>Seasons here</dt>
+                <dd>{p.yearsWithTeam}</dd>
+                <dt title="Share of his team's possessions he finishes while on the floor">
+                  Usage
+                </dt>
+                <dd>{pct0(p.tendencies.usage)}</dd>
+              </dl>
+              <div className="faint" style={{ fontSize: 11, marginTop: 8, marginBottom: 3 }}>
+                Where his shots come from
+              </div>
+              <dl className="kv">
+                <dt>At the rim</dt>
+                <dd>{pct0(p.tendencies.shotRim)}</dd>
+                <dt>Close range</dt>
+                <dd>{pct0(p.tendencies.shotClose)}</dd>
+                <dt>Mid-range</dt>
+                <dd>{pct0(p.tendencies.shotMid)}</dd>
+                <dt>Three-point</dt>
+                <dd>{pct0(p.tendencies.shotThree)}</dd>
+              </dl>
+            </Panel>
+          </div>
         </div>
       </div>
     </Modal>
   )
 }
 
+function InSeasonSign({ finance }: { finance: TeamFinance }) {
+  const { client, refresh, snapshot } = useStore()
+  const [pool, setPool] = useState<FreeAgentView[]>([])
+  const [working, setWorking] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+  const room = finance.roster < finance.rosterMax
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: snapshot is the refetch trigger
+  useEffect(() => {
+    let live = true
+    client
+      .manager<FreeAgentView[]>('inSeasonFreeAgents')
+      .then((rows) => {
+        if (live) setPool(rows)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [client, snapshot])
+
+  const sign = async (id: string) => {
+    setWorking(true)
+    setNote(null)
+    try {
+      const res = await client.manager<{ ok: boolean; message: string }>('signFreeAgent', id)
+      setNote(res.message)
+      if (res.ok) await refresh()
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  if (pool.length === 0) return null
+
+  return (
+    <Panel title="Free agents">
+      <p className="dim" style={{ margin: '0 0 8px', fontSize: 12 }}>
+        {room
+          ? `Rest-of-season minimum. ${finance.rosterMax - finance.roster} spot${
+              finance.rosterMax - finance.roster === 1 ? '' : 's'
+            } left.`
+          : `Roster is full at ${finance.rosterMax}. Waive someone first.`}
+      </p>
+      {note ? (
+        <p className="faint" style={{ fontSize: 12, margin: '0 0 8px' }}>
+          {note}
+        </p>
+      ) : null}
+      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
+        {pool.slice(0, 10).map((p) => (
+          <li key={p.playerId} className="rowline" style={{ gap: 10 }}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              {p.name}{' '}
+              <span className="dim">
+                {p.pos} · {p.age} · {p.overall}
+              </span>
+            </span>
+            <span className="num faint">{money(p.asking)}</span>
+            <button
+              type="button"
+              className="ghost"
+              disabled={working || !room}
+              onClick={() => void sign(p.playerId)}
+            >
+              Sign
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  )
+}
+
 export function Roster() {
-  const { client, snapshot, teams, teamById } = useStore()
+  const { client, snapshot, teams, teamById, setScreen } = useStore()
   const me = snapshot?.state.userTeamId ?? ''
   const [teamId, setTeamId] = useState(me)
   const [rows, setRows] = useState<RosterRow[]>([])
@@ -533,6 +670,16 @@ export function Roster() {
         {finance ? <CapLine finance={finance} /> : null}
       </div>
 
+      {snapshot.state.seasonComplete ? (
+        <div className="banner">
+          You are in the offseason. This roster is still yours — re-sign and free agency live on the{' '}
+          <button type="button" className="lg-link" onClick={() => setScreen('offseason')}>
+            Offseason
+          </button>{' '}
+          tab, as their own steps.
+        </div>
+      ) : null}
+
       <div
         style={{
           display: 'grid',
@@ -556,6 +703,11 @@ export function Roster() {
           </Panel>
         ) : null}
       </div>
+
+      {teamId === me && !snapshot.state.seasonComplete && finance ? (
+        <InSeasonSign finance={finance} />
+      ) : null}
+
       <p className="faint" style={{ fontSize: 11 }}>
         Click a row for the player card. Ratings are 0–100 on a fixed 1998–2026 anchor: 50 is the
         pooled league mean, 15 per standard deviation.

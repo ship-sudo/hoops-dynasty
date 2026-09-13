@@ -5,19 +5,35 @@ import { Panel, TeamChip } from '../ui/bits.tsx'
 import { type Column, DataTable } from '../ui/DataTable.tsx'
 import { money } from '../ui/format.ts'
 import type { PhaseProps } from './Draft.tsx'
+import { marketFreeAgents, ownFreeAgents } from './offseasonFlow.ts'
 
 const toM = (v: number) => Math.round((v / 1_000_000) * 100) / 100
 
-export function FreeAgency({ off, act, working, me }: PhaseProps) {
+export function FreeAgency({
+  off,
+  act,
+  working,
+  me,
+  pool = 'market',
+}: PhaseProps & { pool?: 'own' | 'market' }) {
   const { teamById } = useStore()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [amountM, setAmountM] = useState('')
   const [years, setYears] = useState(2)
+  const agents = useMemo(
+    () =>
+      pool === 'own' ? ownFreeAgents(off.freeAgents, me) : marketFreeAgents(off.freeAgents, me),
+    [off.freeAgents, me, pool],
+  )
 
   const selected = useMemo(
-    () => off.freeAgents.find((p) => p.playerId === selectedId) ?? null,
-    [off.freeAgents, selectedId],
+    () => agents.find((p) => p.playerId === selectedId) ?? null,
+    [agents, selectedId],
   )
+
+  useEffect(() => {
+    if (selectedId && !agents.some((p) => p.playerId === selectedId)) setSelectedId(null)
+  }, [agents, selectedId])
 
   // Selecting a player loads his existing offer, or his asking price as the opening bid.
   useEffect(() => {
@@ -26,7 +42,7 @@ export function FreeAgency({ off, act, working, me }: PhaseProps) {
     setYears(selected.offer?.years ?? selected.askingYears)
   }, [selected])
 
-  const offers = useMemo(() => off.freeAgents.filter((p) => p.offer), [off.freeAgents])
+  const offers = useMemo(() => agents.filter((p) => p.offer), [agents])
   const committed = offers.reduce((t, p) => t + (p.offer?.amount ?? 0), 0)
 
   const fin = off.finance
@@ -120,9 +136,11 @@ export function FreeAgency({ off, act, working, me }: PhaseProps) {
             ) : null}
           </dl>
           <p className="faint" style={{ fontSize: 11, margin: '8px 0 0' }}>
-            {space < 0
-              ? 'You are already over the cap, so you can only add men on the league minimum or re-sign your own.'
-              : 'Room is what you can offer a player from another club without help from any exception.'}
+            {pool === 'own'
+              ? 'Bird rights let you re-sign your own men even when you are over the cap.'
+              : space < 0
+                ? 'You are already over the cap, so you can only add men on the league minimum or re-sign your own.'
+                : 'Room is what you can offer a player from another club without help from any exception.'}
           </p>
         </Panel>
         <Panel title={`Committed · ${offers.length} offer${offers.length === 1 ? '' : 's'}`}>
@@ -148,29 +166,43 @@ export function FreeAgency({ off, act, working, me }: PhaseProps) {
             </p>
           ) : (
             <p className="dim" style={{ margin: '8px 0 0' }}>
-              Offers are resolved when you start the season. Best bid wins; the player decides.
+              Meet the ask and he decides today. Bid short and Sim a day — someone else may take him
+              before you raise it.
             </p>
           )}
         </Panel>
       </div>
 
       <div className="fagrid">
-        <Panel title={`Market · ${off.freeAgents.length} available`} flush>
+        <Panel
+          title={
+            pool === 'own'
+              ? `Your free agents · ${agents.length}`
+              : `Market · ${agents.length} available`
+          }
+          flush
+        >
           <DataTable
-            data={off.freeAgents}
+            data={agents}
             columns={cols}
             initialSort={[{ id: 'ovr', desc: true }]}
             onRowClick={(p) => setSelectedId(p.playerId)}
             rowClass={(p) =>
               p.playerId === selectedId ? 'me' : p.incumbentTeamId === me ? 'oncl' : undefined
             }
-            empty="Nobody left on the market."
+            empty={
+              pool === 'own'
+                ? 'Nobody of yours is a free agent. Everyone is under contract.'
+                : 'Nobody left on the market.'
+            }
           />
         </Panel>
 
         <Panel title="Offer">
           {!selected ? (
-            <p className="dim">Select a free agent to bid.</p>
+            <p className="dim">
+              {pool === 'own' ? 'Select one of yours to re-sign.' : 'Select a free agent to bid.'}
+            </p>
           ) : (
             <div style={{ display: 'grid', gap: 10 }}>
               <div>
@@ -241,6 +273,11 @@ export function FreeAgency({ off, act, working, me }: PhaseProps) {
                   Withdraw
                 </button>
               </div>
+              <p className="faint" style={{ fontSize: 11, margin: 0 }}>
+                {Number(amountM) * 1_000_000 + 1 >= selected.asking
+                  ? 'That meets what he wants. Make the offer and he decides today — watch the wire.'
+                  : 'Short of his price. Leave it on the table and Sim a day, or raise it.'}
+              </p>
             </div>
           )}
 

@@ -13,11 +13,13 @@
  *   - News. The state keeps a structured log; the inbox wants sentences.
  */
 import {
+  emptyStatLine,
   type GameResult,
   isNeutralInstruction,
   makeRng,
   normaliseInstruction,
   normaliseLineups,
+  normaliseUnitTactics,
   type PlayerRecord,
   RATING_KEYS,
   type Ratings,
@@ -28,13 +30,17 @@ import {
 import { ERA, ERA_FIRST, ERA_LAST } from '@hoops/data/era'
 import { classFor, fictionalClass, NameBank, scout } from '@hoops/draftclass'
 import { simulateGame } from '@hoops/engine'
-import { maxSalary, minSalary, salariesFor } from '@hoops/frontoffice'
+import { canWaive, maxSalary, minSalary, salariesFor } from '@hoops/frontoffice'
 import {
   allStarDate,
   askingMultiplier,
+  availabilityOf,
+  autoAdjustSettings,
+  markInjuryCover,
   type Conference,
   candidates,
   careerOf,
+  chooseSquad,
   conferenceOrder,
   daysBetween,
   type GameHooks,
@@ -52,6 +58,7 @@ import {
   openDraft,
   pickAllStars,
   ROLE_MINUTES,
+  restReason,
   rolloverBegin,
   rolloverFinish,
   runDraft,
@@ -62,7 +69,7 @@ import {
   type TeamSettings,
   wantsOut,
 } from '@hoops/game'
-import { injuryOutlook, lingeringPenalty } from '@hoops/injury'
+import { injuryOutlook, injuryRisk, isWarning, lingeringPenalty } from '@hoops/injury'
 import { blendToFate, develop, draftPotential, overall, retires } from '@hoops/progression'
 import type {
   AllStarGame,
@@ -75,6 +82,7 @@ import type {
   Dynasty,
   DynastyModule,
   DynastyState,
+  FreeAgentView,
   GameLogRow,
   GamePreview,
   LeaderRow,
@@ -91,6 +99,7 @@ import type {
   ScheduleEntry,
   ScoutedView,
   SeasonTotals,
+  SimInterrupt,
   SimSeason,
   SquadMoodView,
   StandingsRow,
@@ -110,6 +119,7 @@ import {
   freeAgentPool,
   type Potentials,
   runMarket,
+  runMarketDay,
   seasonTaxBills,
   signRookies,
   type UserOffer,
@@ -129,6 +139,7 @@ import {
 import { tradeAlert, weeklyRumours } from './rumours.ts'
 import { developmentFactor, fire, hire, scoutingOf, staffView } from './staff.ts'
 import { aiTradeRound, applyTrade, assess, incomingOffers, picksOf, tradeBlock } from './trades.ts'
+import { applySignMinimum, applyWaive, unsignedPool } from './transactions.ts'
 
 /** How many recent box scores to keep. Enough for the inbox to stay clickable; small enough to hold. */
 const BOX_CACHE = 400
@@ -481,6 +492,24 @@ function moodOf(state: GameState, p: LeaguePlayer): PlayerMood {
   }
 }
 
+/** A live absence or a warning the manager is playing through. Recovering-but-dressed is hidden. */
+function liveInjury(
+  state: GameState,
+  playerId: string,
+): NonNullable<RosterRow['injury']> | undefined {
+  const a = state.availability?.[playerId]
+  if (!a?.injury) return undefined
+  const playingThrough = Boolean(a.playingThrough)
+  if (a.out <= 0 && !playingThrough) return undefined
+  const hit: NonNullable<RosterRow['injury']> = {
+    name: a.injury.name,
+    games: a.out > 0 ? a.out : a.injury.games,
+    warning: isWarning(a.injury),
+  }
+  if (playingThrough) hit.playingThrough = true
+  return hit
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // The postseason, read off the state the sim already keeps.
 //
@@ -798,7 +827,7 @@ function dynastyOf(
   potentials: Potentials,
   opts: RealOptions,
   savedBoxes: readonly (readonly [string, GameResult])[] = [],
-  resume: { offers: UserOffer[]; marketOpen: boolean; fired?: string[] } = {
+  resume: { offers: UserOffer[]; marketOpen: boolean; fired?: string[]; marketDay?: number } = {
     offers: [],
     marketOpen: false,
   },
@@ -817,6 +846,7 @@ function dynastyOf(
   const userOffers = new Map<string, UserOffer>(resume.offers.map((o) => [o.playerId, o]))
   // True once the draft is done and the market has been opened for bidding.
   let marketOpen = resume.marketOpen
+  let marketDay = resume.marketDay ?? 0
   // The draft board is cleared when the league rolls into the new season, but the summary screen
   // still has to be able to say who you took — including picks made for you when you pressed
   // "start the season" while you were on the clock.
@@ -885,6 +915,125 @@ function dynastyOf(
     return makeRng(h)
   }
 
+  const playerName = (id: string): string =>
+    current.league.players.find((p) => p.playerId === id)?.name ?? id
+
+  const blankSettings = (): TeamSettings => ({
+    tactics: { pace: 0, threes: 0, crashGlass: 0, pressure: 0, zone: false },
+    depth: [],
+    minutes: {},
+    inactive: [],
+  })
+
+  const applyComputerLineup = (extraSkip: string[] = []): void => {
+    const teamId = current.userTeamId
+    const roster = current.league.players.filter((p) => p.teamId === teamId)
+    const skip = new Set(extraSkip)
+    for (const p of roster) {
+      if (availabilityOf(current, p.playerId).out > 0) skip.add(p.playerId)
+    }
+    for (const id of skip) markInjuryCover(current, id)
+    const existing = current.teamSettings[teamId] ?? blankSettings()
+    const playoffs = current.phase === 'playoffs' || current.phase === 'playin'
+    current.teamSettings[teamId] = autoAdjustSettings(existing, roster, skip, playoffs)
+  }
+
+  const swallowLineupHit = (interrupt: SimInterrupt | null | undefined): SimInterrupt | null => {
+    if (!interrupt || !current.autoLineup) return interrupt ?? null
+    if (interrupt.kind === 'injury') {
+      const a = availabilityOf(current, interrupt.playerId)
+      a.playingThrough = false
+      if (a.out === 0 && a.injury) a.out = Math.max(1, a.injury.games)
+      applyComputerLineup([interrupt.playerId])
+      return null
+    }
+    if (interrupt.kind === 'return') {
+      applyComputerLineup()
+      return null
+    }
+    return interrupt
+  }
+
+  /**
+   * One calendar day: games, then the weekly paper, then maybe a live offer that stops Continue.
+   * Accepting that offer is executeTrade — it never plays another night.
+   */
+  const playOneDay = (): DayReport | null => {
+    // Once the season is over, Continue stops. The offseason is played through its own screens
+    // (offseason / advanceDraft / draftPlayer / makeOffer / finishOffseason) so the draft and the
+    // market are the user's to run, not something that happens to him while he is not looking.
+    if (!PLAYING.has(current.phase)) return null
+    const before = current.calendar.date
+    const out = gameSimDay(current, hooks)
+    current = out.state
+    absorb(out.results)
+    if (out.results.length === 0 && current.calendar.date === before) return null
+
+    let offerHit: SimInterrupt | undefined
+    if (current.phase === 'regular' && lastRumourDate === '') {
+      lastRumourDate = current.calendar.date
+    } else if (
+      current.phase === 'regular' &&
+      daysBetween(lastRumourDate, current.calendar.date) >= 7
+    ) {
+      lastRumourDate = current.calendar.date
+      const ctx = {
+        state: current,
+        potentials,
+        rng: rngFor(`rumours-${current.calendar.date}`),
+        nameOf: (teamId) => clubName(current, teamId),
+      }
+      const talk = weeklyRumours(ctx)
+      // A concrete offer lands every few weeks rather than every week, so it stays an event.
+      if (ctx.rng.chance(0.35)) {
+        const alert = tradeAlert(ctx)
+        if (alert) {
+          talk.push(alert.item)
+          // Injury / return / All-Star / champion already stopped the week. An offer waits its turn.
+          if (!out.interrupt) {
+            offerHit = {
+              kind: 'offer',
+              otherTeamId: alert.offer.other.teamId,
+              otherName: clubName(current, alert.offer.other.teamId),
+              user: alert.offer.user,
+              other: alert.offer.other,
+              theyWant: alert.offer.user.players.map(playerName),
+              theyGive: alert.offer.other.players.map(playerName),
+              theyWantPicks: alert.offer.user.picks.length,
+              theyGivePicks: alert.offer.other.picks.length,
+              reason: alert.assessment.reason,
+              net: alert.assessment.net,
+            }
+          }
+        }
+      }
+      feed.push(...talk)
+    }
+
+    // Skip AI-AI business on a day we paused for an offer, so the packages on the table still exist.
+    if (
+      !offerHit &&
+      current.phase === 'regular' &&
+      current.calendar.next > 0 &&
+      current.calendar.next % 90 === 0
+    ) {
+      for (const deal of aiTradeRound(
+        current,
+        potentials,
+        rngFor(`trades-${current.calendar.date}`),
+      ))
+        current.log.push({
+          date: current.calendar.date,
+          yearEnd: current.season.yearEnd,
+          kind: 'trade',
+          text: deal.text,
+        })
+    }
+
+    const interrupt = swallowLineupHit((out.interrupt as SimInterrupt | null) ?? offerHit)
+    return report(out.results, current.calendar.date, interrupt ?? undefined)
+  }
+
   /** The lottery, then the board. Safe to call repeatedly. */
   const ensureDraftOpen = (): void => {
     if (current.phase === 'lottery') {
@@ -906,6 +1055,70 @@ function dynastyOf(
     signRookies(current, yearEnd)
     backfillPool(current, yearEnd, rng, potentials)
     marketOpen = true
+  }
+
+  const clubName = (teamId: string): string => {
+    const t = current.league.teams.find((x) => x.teamId === teamId)
+    return t ? `${t.city} ${t.name}` : teamId
+  }
+
+  const logSigning = (playerId: string, amount: number, years: number, teamId: string): void => {
+    const name = current.league.players.find((p) => p.playerId === playerId)?.name ?? playerId
+    const yours = teamId === current.userTeamId
+    current.log.push({
+      date: current.calendar.date,
+      yearEnd: current.season.yearEnd,
+      kind: 'signing',
+      text: yours
+        ? `Signed ${name} for $${(amount / 1_000_000).toFixed(1)}M over ${years} year${years === 1 ? '' : 's'}`
+        : `${name} signed with ${clubName(teamId)}`,
+    })
+  }
+
+  /** One day of the market. Ready bids land; everyone else takes a round. */
+  const stepMarket = (): void => {
+    if (!marketOpen) openMarket()
+    marketDay++
+    const yearEnd = current.season.yearEnd + 1
+    const outcome = runMarketDay(current, yearEnd, rngFor(`market-${marketDay}`), potentials, [
+      ...userOffers.values(),
+    ])
+    userOffers.clear()
+    for (const o of outcome.pending) userOffers.set(o.playerId, o)
+    const stolenIds = new Set(outcome.stolen.map((x) => x.playerId))
+    let quiet = 0
+    for (const s of outcome.signings) {
+      if (stolenIds.has(s.playerId) || s.teamId === current.userTeamId) continue
+      const p = current.league.players.find((x) => x.playerId === s.playerId)
+      if (p && overall(p.ratings) >= 58) logSigning(s.playerId, s.amount, s.years, s.teamId)
+      else quiet++
+    }
+    if (quiet > 0)
+      current.log.push({
+        date: current.calendar.date,
+        yearEnd: current.season.yearEnd,
+        kind: 'signing',
+        text: `${quiet} other deal${quiet === 1 ? '' : 's'} around the league`,
+      })
+    // Your own outcomes last, so they sit at the top of the wire instead of falling off it
+    // when the rest of the league signs twenty men in a day.
+    for (const miss of outcome.rejected)
+      current.log.push({
+        date: current.calendar.date,
+        yearEnd: current.season.yearEnd,
+        kind: 'signing',
+        text: `No deal for ${miss.name}: ${miss.reason}`,
+      })
+    for (const s of outcome.stolen)
+      current.log.push({
+        date: current.calendar.date,
+        yearEnd: current.season.yearEnd,
+        kind: 'signing',
+        text: `${s.name} signed with ${clubName(s.teamId)} — they beat your offer`,
+      })
+    for (const s of outcome.signings) {
+      if (s.teamId === current.userTeamId) logSigning(s.playerId, s.amount, s.years, s.teamId)
+    }
   }
 
   const offseasonView = (): OffseasonState => {
@@ -1046,16 +1259,23 @@ function dynastyOf(
       yearEnd,
     )
     const payrollAmt = salaries.reduce((t, x) => (x.kind === 'two_way' ? t : t + x.amount), 0)
+    const deadCap = (current.deadMoney ?? [])
+      .filter((d) => d.teamId === teamId && d.yearEnd === yearEnd)
+      .reduce((t, d) => t + d.amount, 0)
     const bills = seasonTaxBills(current, yearEnd)
     const mine = bills.find((b) => b.teamId === teamId)
     return {
       teamId,
-      payroll: payrollAmt,
+      payroll: payrollAmt + deadCap,
       cap: rules.cap,
       taxLine: rules.tax_line ?? rules.cap,
       apron1: rules.apron_1,
       apron2: rules.apron_2,
       roster: squad.length,
+      rosterMin: rules.roster_min,
+      rosterMax: rules.roster_max,
+      rosterActive: rules.roster_active,
+      deadCap,
       taxBill: mine?.bill ?? 0,
       repeater: mine?.repeater ?? false,
     }
@@ -1098,12 +1318,15 @@ function dynastyOf(
     let kind: PlayerDesk['contract']['kind'] = 'none'
     if (yours && marketOpen && !hasNext) kind = 'fa'
     else if (yours && remaining.length > 0 && remaining.length < 5) kind = 'extend'
+    const rosterCount = current.league.players.filter((x) => x.teamId === current.userTeamId).length
+    const cut = yours ? canWaive(rosterCount, rules) : null
     return {
       playerId,
       yours,
       listed,
       offers,
       names,
+      waive: cut,
       contract: {
         kind: out && kind !== 'none' ? 'none' : kind,
         asking: ask.amount,
@@ -1190,7 +1413,7 @@ function dynastyOf(
   const scoreCandidates = (limit: number): AwardRace => {
     const all = candidates(current)
     const byId = new Map(current.league.players.map((p) => [p.playerId, p]))
-    const toCandidate = (list: typeof all, key: 'mvp' | 'dpoy'): AwardCandidate[] => {
+    const toCandidate = (list: typeof all, key: 'mvp' | 'mvpVote' | 'dpoy'): AwardCandidate[] => {
       const top = [...list].sort((a, b) => b[key] - a[key]).slice(0, limit)
       // Vote share among the shortlist, so the gap between first and second is visible.
       const total = top.reduce((acc, c) => acc + Math.max(0, c[key]), 0) || 1
@@ -1214,7 +1437,7 @@ function dynastyOf(
       })
     }
     return {
-      mvp: toCandidate(all, 'mvp'),
+      mvp: toCandidate(all, 'mvpVote'),
       roy: toCandidate(
         all.filter((c) => c.rookie),
         'mvp',
@@ -1238,6 +1461,7 @@ function dynastyOf(
         gamesPlayed: played,
         gamesTotal: total,
         seasonComplete: !PLAYING.has(current.phase),
+        autoLineup: Boolean(current.autoLineup),
       }
     },
 
@@ -1257,75 +1481,17 @@ function dynastyOf(
       })),
 
     simDay() {
-      // Once the season is over, Continue stops. The offseason is played through its own screens
-      // (offseason / advanceDraft / draftPlayer / makeOffer / finishOffseason) so the draft and the
-      // market are the user's to run, not something that happens to him while he is not looking.
-      if (!PLAYING.has(current.phase)) return null
-      const before = current.calendar.date
-      const out = gameSimDay(current, hooks)
-      current = out.state
-      absorb(out.results)
-      if (out.results.length === 0 && current.calendar.date === before) return null
-      // Once a week the league talks: who has been asked about, who is unhappy, who is hot, and
-      // — occasionally — a real offer the user can accept from the trade desk.
-      if (current.phase === 'regular' && lastRumourDate === '') {
-        // First day of the season: start the clock, nobody has anything to say yet.
-        lastRumourDate = current.calendar.date
-      } else if (
-        current.phase === 'regular' &&
-        daysBetween(lastRumourDate, current.calendar.date) >= 7
-      ) {
-        lastRumourDate = current.calendar.date
-        const ctx = {
-          state: current,
-          potentials,
-          rng: rngFor(`rumours-${current.calendar.date}`),
-          nameOf: (teamId: string) => {
-            const t = current.league.teams.find((x) => x.teamId === teamId)
-            return t ? `${t.city} ${t.name}` : teamId
-          },
-        }
-        const talk = weeklyRumours(ctx)
-        // A concrete offer lands every few weeks rather than every week, so it stays an event.
-        if (ctx.rng.chance(0.35)) {
-          const alert = tradeAlert(ctx)
-          if (alert) talk.push(alert.item)
-        }
-        feed.push(...talk)
-      }
-
-      // The rest of the league does business too, about once a week, and only in the regular season.
-      if (
-        current.phase === 'regular' &&
-        current.calendar.next > 0 &&
-        current.calendar.next % 90 === 0
-      ) {
-        for (const deal of aiTradeRound(
-          current,
-          potentials,
-          rngFor(`trades-${current.calendar.date}`),
-        ))
-          current.log.push({
-            date: current.calendar.date,
-            yearEnd: current.season.yearEnd,
-            kind: 'trade',
-            text: deal.text,
-          })
-      }
-      return report(out.results, current.calendar.date, out.interrupt ?? undefined)
+      return playOneDay()
     },
 
     simToDate(isoDate, onDay) {
       const reports: DayReport[] = []
       let index = 0
-      // One day at a time, so progress can be reported and the caller can stop.
+      // Same door as Continue: rumours, incoming offers, AI-AI trades. A Sim to date that
+      // skipped this used to walk past a live offer while the rest of the league moved.
       while (current.calendar.date <= isoDate && PLAYING.has(current.phase)) {
-        const out = gameSimDay(current, hooks)
-        const moved = out.state.calendar.date !== current.calendar.date || out.results.length > 0
-        current = out.state
-        absorb(out.results)
-        if (!moved) break
-        const r = report(out.results, current.calendar.date, out.interrupt ?? undefined)
+        const r = playOneDay()
+        if (!r) break
         reports.push(r)
         const cont = onDay?.(r, index++)
         if (r.interrupt || cont === false) break
@@ -1336,46 +1502,105 @@ function dynastyOf(
     standings: () => standingsFrom(current),
     boxScore: (gameId) => userBoxes.get(gameId) ?? boxes.get(gameId) ?? null,
 
-    gameLog(playerId, limit = 82): GameLogRow[] {
+    gameLog(playerId, limit = 120): GameLogRow[] {
       const rows: GameLogRow[] = []
-      // Newest first: walk the season's results backwards and pull his line out of each box.
+      const teamId = current.league.players.find((p) => p.playerId === playerId)?.teamId
+      const dnpRow = (
+        g: (typeof current.calendar.results)[number],
+        home: boolean,
+        seasonType: NonNullable<GameLogRow['seasonType']>,
+      ): GameLogRow => {
+        const teamPts = home ? g.homePts : g.awayPts
+        const opponentPts = home ? g.awayPts : g.homePts
+        return {
+          gameId: g.gameId,
+          date: g.date,
+          opponentTeamId: home ? g.awayTeamId : g.homeTeamId,
+          home,
+          won: teamPts > opponentPts,
+          teamPts,
+          opponentPts,
+          started: false,
+          seasonType,
+          dnp: true,
+          line: emptyStatLine(),
+        }
+      }
+      // Newest first. A box is the full line; playoff summaries still carry pts/reb/ast/min
+      // after the box cache has moved on, so a playoff card does not go blank in June.
       for (let i = current.calendar.results.length - 1; i >= 0 && rows.length < limit; i--) {
         const g = current.calendar.results[i]
         if (!g) continue
+        const seasonType = g.seasonType ?? 'regular'
+        const hisTeam = Boolean(teamId && (g.homeTeamId === teamId || g.awayTeamId === teamId))
         const box = userBoxes.get(g.gameId) ?? boxes.get(g.gameId)
-        if (!box) continue
-        const home = box.home.players.some((p) => p.playerId === playerId)
-        const side = home ? box.home : box.away
-        const line = side.players.find((p) => p.playerId === playerId)
-        if (!line) continue
-        const opponent = home ? box.away : box.home
-        rows.push({
-          gameId: g.gameId,
-          date: g.date,
-          opponentTeamId: opponent.teamId,
-          home,
-          won: side.pts > opponent.pts,
-          teamPts: side.pts,
-          opponentPts: opponent.pts,
-          started: line.starter,
-          line: {
-            min: line.min,
-            pts: line.pts,
-            fgm: line.fgm,
-            fga: line.fga,
-            fg3m: line.fg3m,
-            fg3a: line.fg3a,
-            ftm: line.ftm,
-            fta: line.fta,
-            oreb: line.oreb,
-            dreb: line.dreb,
-            ast: line.ast,
-            stl: line.stl,
-            blk: line.blk,
-            tov: line.tov,
-            pf: line.pf,
-          },
-        })
+        if (box) {
+          const inHome = box.home.players.some((p) => p.playerId === playerId)
+          const inAway = box.away.players.some((p) => p.playerId === playerId)
+          if (inHome || inAway) {
+            const side = inHome ? box.home : box.away
+            const line = side.players.find((p) => p.playerId === playerId)
+            if (!line) continue
+            const opponent = inHome ? box.away : box.home
+            rows.push({
+              gameId: g.gameId,
+              date: g.date,
+              opponentTeamId: opponent.teamId,
+              home: inHome,
+              won: side.pts > opponent.pts,
+              teamPts: side.pts,
+              opponentPts: opponent.pts,
+              started: line.starter,
+              seasonType,
+              line: {
+                min: line.min,
+                pts: line.pts,
+                fgm: line.fgm,
+                fga: line.fga,
+                fg3m: line.fg3m,
+                fg3a: line.fg3a,
+                ftm: line.ftm,
+                fta: line.fta,
+                oreb: line.oreb,
+                dreb: line.dreb,
+                ast: line.ast,
+                stl: line.stl,
+                blk: line.blk,
+                tov: line.tov,
+                pf: line.pf,
+              },
+            })
+            continue
+          }
+          if (hisTeam) rows.push(dnpRow(g, g.homeTeamId === teamId, seasonType))
+          continue
+        }
+        const thin = g.players?.find((p) => p.playerId === playerId)
+        if (thin && thin.min > 0) {
+          const home = g.homeTeamId === thin.teamId
+          const teamPts = home ? g.homePts : g.awayPts
+          const opponentPts = home ? g.awayPts : g.homePts
+          const line = emptyStatLine()
+          line.min = thin.min
+          line.pts = thin.pts
+          line.dreb = thin.reb
+          line.ast = thin.ast
+          rows.push({
+            gameId: g.gameId,
+            date: g.date,
+            opponentTeamId: home ? g.awayTeamId : g.homeTeamId,
+            home,
+            won: teamPts > opponentPts,
+            teamPts,
+            opponentPts,
+            started: false,
+            seasonType,
+            thin: true,
+            line,
+          })
+          continue
+        }
+        if (hisTeam && seasonType !== 'regular') rows.push(dnpRow(g, g.homeTeamId === teamId, seasonType))
       }
       return rows
     },
@@ -1415,6 +1640,7 @@ function dynastyOf(
         .map((p): RosterRow => {
           const stat = current.stats[p.playerId]
           const contractYear = p.contract?.years.find((y) => y.yearEnd === current.season.yearEnd)
+          const injury = liveInjury(current, p.playerId)
           return {
             player: toPlayerRecord(p, bundle),
             mood: moodOf(current, p),
@@ -1435,7 +1661,17 @@ function dynastyOf(
               p.yearsPro,
               careerOf(current, p.playerId)?.seasons.at(-1)?.gp,
               current.teamSettings[teamId]?.minutes[p.playerId],
+              current.season.rules.games,
             ),
+            injuryRisk: injuryRisk(
+              p.ratings.durability,
+              p.age,
+              p.yearsPro,
+              careerOf(current, p.playerId)?.seasons.at(-1)?.gp,
+              current.teamSettings[teamId]?.minutes[p.playerId],
+              current.season.rules.games,
+            ),
+            ...(injury ? { injury } : {}),
           }
         })
         .sort((a, b) => (b.totals.min || b.player.realMpg) - (a.totals.min || a.player.realMpg))
@@ -1540,8 +1776,11 @@ function dynastyOf(
         inactive: s?.inactive ?? [],
         lineup: s?.lineup ?? {},
         lineups: s?.lineups ?? {},
+        unitTactics: s?.unitTactics ?? {},
         system: s?.system ?? 'balanced',
         instructions: s?.instructions ?? {},
+        rest: s?.rest ?? {},
+        sitNext: s?.sitNext ?? [],
       }
     },
 
@@ -1558,6 +1797,10 @@ function dynastyOf(
         ? Object.fromEntries(Object.entries(plan.lineup).filter(([, id]) => !!id))
         : (existing.lineup ?? {})
       const lineups = plan.lineups !== undefined ? normaliseLineups(plan.lineups) : existing.lineups
+      const unitTactics =
+        plan.unitTactics !== undefined
+          ? normaliseUnitTactics(plan.unitTactics)
+          : existing.unitTactics
       // The same for instructions: a neutral instruction is simply dropped, so a plan the manager
       // has reset is stored as nothing at all and the save stays small.
       const instructions = plan.instructions
@@ -1577,7 +1820,51 @@ function dynastyOf(
         instructions,
       }
       if (lineups) next.lineups = lineups
+      if (unitTactics) next.unitTactics = unitTactics
+      const rest = plan.rest !== undefined ? plan.rest : existing.rest
+      if (rest && Object.keys(rest).length) next.rest = rest
+      const sitNext = plan.sitNext !== undefined ? plan.sitNext : existing.sitNext
+      if (sitNext?.length) next.sitNext = sitNext
       current.teamSettings[teamId] = next
+    },
+
+    resolveInjury(playerId, choice) {
+      const p = current.league.players.find((x) => x.playerId === playerId)
+      if (!p || p.teamId !== current.userTeamId) return
+      const a = availabilityOf(current, playerId)
+      if (choice === 'playThrough') {
+        if (!a.injury || !isWarning(a.injury)) return
+        a.out = 0
+        a.playingThrough = true
+        return
+      }
+      if (choice === 'restore') {
+        a.playingThrough = false
+        applyComputerLineup()
+        return
+      }
+      a.playingThrough = false
+      if (a.out === 0 && a.injury) a.out = Math.max(1, a.injury.games)
+      applyComputerLineup([playerId])
+    },
+
+    setAutoLineup(on) {
+      current.autoLineup = on
+    },
+
+    sitTonight(playerId, sit) {
+      const p = current.league.players.find((x) => x.playerId === playerId)
+      if (!p || p.teamId !== current.userTeamId) return
+      const existing: TeamSettings = current.teamSettings[current.userTeamId] ?? {
+        tactics: { pace: 0, threes: 0, crashGlass: 0, pressure: 0, zone: false },
+        depth: [],
+        minutes: {},
+        inactive: [],
+      }
+      const held = new Set(existing.sitNext ?? [])
+      if (sit) held.add(playerId)
+      else held.delete(playerId)
+      current.teamSettings[current.userTeamId] = { ...existing, sitNext: [...held] }
     },
 
     // ── Trades ───────────────────────────────────────────────────────────────
@@ -1625,6 +1912,36 @@ function dynastyOf(
     },
 
     playerDesk: (playerId) => deskOf(playerId),
+
+    waivePlayer(playerId) {
+      const res = applyWaive(current, playerId)
+      return { ...res, desk: deskOf(playerId) }
+    },
+
+    inSeasonFreeAgents(): FreeAgentView[] {
+      if (!PLAYING.has(current.phase)) return []
+      const rules = current.season.rules
+      return unsignedPool(current)
+        .map((p) => ({
+          playerId: p.playerId,
+          name: p.name,
+          pos: p.pos,
+          age: p.age,
+          overall: Math.round(overall(p.ratings)),
+          asking: minSalary(rules, p.yearsPro),
+          askingYears: 1,
+          offer: null,
+          incumbentTeamId: null,
+        }))
+        .sort((a, b) => b.overall - a.overall)
+        .slice(0, 40)
+    },
+
+    signFreeAgent(playerId) {
+      if (!PLAYING.has(current.phase))
+        return { ok: false, message: 'Signings in the summer go through free agency.' }
+      return applySignMinimum(current, playerId)
+    },
 
     extendContract(playerId, amount, years) {
       const res = extendPlayer(current, playerId, amount, years, potentials)
@@ -1709,12 +2026,26 @@ function dynastyOf(
     },
 
     makeOffer(playerId, amount, years): OffseasonState {
-      if (marketOpen) userOffers.set(playerId, { playerId, amount, years })
+      if (marketOpen) {
+        userOffers.set(playerId, { playerId, amount, years })
+        const yearEnd = current.season.yearEnd + 1
+        const fa = freeAgentPool(current, yearEnd, potentials).find((p) => p.playerId === playerId)
+        if (fa) {
+          const ask = askingFrom(current, fa, current.userTeamId)
+          if (amount + 1 >= ask.amount) stepMarket()
+        }
+      }
       return offseasonView()
     },
 
     withdrawOffer(playerId): OffseasonState {
       userOffers.delete(playerId)
+      return offseasonView()
+    },
+
+    advanceMarket(): OffseasonState {
+      if (current.phase === 'draft' && current.draft && !current.draft.done) return offseasonView()
+      stepMarket()
       return offseasonView()
     },
 
@@ -2029,6 +2360,48 @@ function dynastyOf(
         yourForm: formOf(me),
         theirForm: formOf(them),
         ...(next.playoff ? { playoff: next.playoff } : {}),
+        dressing: (() => {
+          const settings = current.teamSettings[me]
+          const opts = {
+            yearEnd: current.season.yearEnd,
+            availability: current.availability ?? {},
+            date: next.date,
+            staff: current.staff,
+          }
+          const games = current.season.rules.games
+          const mine = current.league.players.filter((p) => p.teamId === me)
+          const suited = chooseSquad(mine, opts, settings)
+          const suitedIds = new Set(suited.map((p) => p.playerId))
+          const extraSit = mine.filter((p) => {
+            if (suitedIds.has(p.playerId)) return false
+            const why = restReason(p.playerId, settings, opts)
+            return why === 'sat' || why === 'b2b' || why === 'tired' || why === 'hurt'
+          })
+          const listed = [...suited, ...extraSit]
+          const rows = []
+          for (const p of listed) {
+            const why = restReason(p.playerId, settings, opts)
+            const risk = injuryRisk(
+              p.ratings.durability,
+              p.age,
+              p.yearsPro,
+              careerOf(current, p.playerId)?.seasons.at(-1)?.gp,
+              settings?.minutes[p.playerId],
+              games,
+            )
+            rows.push({
+              playerId: p.playerId,
+              name: p.name,
+              pos: p.pos,
+              overall: overall(p.ratings),
+              sitting: why != null,
+              why,
+              risk: risk.short,
+              riskText: risk.text,
+            })
+          }
+          return rows
+        })(),
       }
     },
 
@@ -2057,6 +2430,7 @@ function dynastyOf(
           // Bids you have placed but not yet resolved, so a reload mid-market keeps them.
           offers: [...userOffers.values()],
           marketOpen,
+          marketDay,
           // Who you have sacked. The staff itself lives in the game state; this is only the grudge.
           fired: [...firedByUser],
         },
@@ -2093,6 +2467,7 @@ export function realModule(opts: RealOptions = {}): DynastyModule {
         offers?: UserOffer[]
         marketOpen?: boolean
         fired?: string[]
+        marketDay?: number
       }
       return dynastyOf(
         bundle,
@@ -2104,6 +2479,7 @@ export function realModule(opts: RealOptions = {}): DynastyModule {
           offers: payload.offers ?? [],
           marketOpen: payload.marketOpen ?? false,
           fired: payload.fired ?? [],
+          marketDay: payload.marketDay ?? 0,
         },
       )
     },

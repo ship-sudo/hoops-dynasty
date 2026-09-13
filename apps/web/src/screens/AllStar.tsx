@@ -10,7 +10,12 @@ import type { AllStarGame, AllStarPick } from '../sim/api.ts'
 import { useStore } from '../store.tsx'
 import { Panel, TeamChip } from '../ui/bits.tsx'
 import { longDate, n1, seasonLabel } from '../ui/format.ts'
+import { GameBox } from './BoxScore.tsx'
 import { useCareerModal } from './leaguebits.tsx'
+
+const allStarName = (id: string) => (id === 'EAST' ? 'East' : id === 'WEST' ? 'West' : id)
+const allStarColor = (id: string) =>
+  id === 'EAST' ? '#1d428a' : id === 'WEST' ? '#c8102e' : '#5b6472'
 
 const daysBetween = (from: string, to: string): number =>
   Math.round(
@@ -195,6 +200,11 @@ export function AllStar() {
                 <span className="dim">No MVP was named.</span>
               )}
             </p>
+            {!result.box ? (
+              <p className="dim" style={{ margin: '10px 0 0', textAlign: 'center' }}>
+                The box wasn't kept on this save.
+              </p>
+            ) : null}
           </>
         ) : (
           <p style={{ margin: 0 }}>
@@ -216,6 +226,14 @@ export function AllStar() {
           </p>
         )}
       </Panel>
+
+      {result?.box ? (
+        <Panel title="Box score">
+          <div style={{ display: 'grid', gap: 14 }}>
+            <GameBox result={result.box} nameOf={allStarName} colorOf={allStarColor} first="home" />
+          </div>
+        </Panel>
+      ) : null}
 
       <div className="lg-allstar">
         <Squad conference="East" picks={game.east} me={me} mvpId={mvpId} onOpen={openCareer} />

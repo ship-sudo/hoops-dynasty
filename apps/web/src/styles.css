@@ -1141,6 +1141,9 @@ table.grid tfoot td {
   background: var(--accent);
   transition: width 120ms linear;
 }
+.progress.watching > .fill {
+  transition: width 700ms var(--ease);
+}
 
 .banner {
   padding: 10px 12px;
@@ -1404,14 +1407,30 @@ table.grid tfoot td {
   padding: 5px 10px;
   border-radius: var(--radius-sm);
   color: var(--ink-faint);
+  border: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.phasebar .step:disabled {
+  cursor: default;
 }
 .phasebar .step.past {
   color: var(--ink-dim);
+}
+.phasebar .step.open {
+  color: var(--ink);
+}
+.phasebar .step.open:hover {
+  color: var(--accent);
 }
 .phasebar .step.now {
   color: var(--accent-ink);
   background: var(--accent);
   box-shadow: var(--shadow-1);
+  cursor: default;
 }
 
 .onclock {
@@ -1754,6 +1773,11 @@ tr.cutline.playin .rule {
   color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 50%, transparent);
   background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.badge.loss {
+  color: var(--loss);
+  border-color: color-mix(in srgb, var(--loss) 50%, transparent);
+  background: color-mix(in srgb, var(--loss) 14%, transparent);
 }
 .badge.dim {
   color: var(--ink-faint);

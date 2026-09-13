@@ -11,7 +11,7 @@ import { seasonId } from '../nba/client.ts'
 import { FIRST_SEASON, fetchTeamCoaches, fetchTeamIds, LAST_SEASON } from '../nba/endpoints.ts'
 import * as nba from '../nba/parse.ts'
 import { loadBref } from './load-bref.ts'
-import { openingNightRosters } from './opening-night.ts'
+import { capWeight, openingNightRosters } from './opening-night.ts'
 import { champion, checkBracket, deriveSeries, type PlayoffGame, playoffSeeds } from './playoffs.ts'
 import { BOX_KEYS, type BoxTotals, deriveStints, emptyTotals } from './stints.ts'
 
@@ -478,6 +478,26 @@ export async function loadSeason(
   if (noHead > 0) gaps.push([y, 'coaches', `${noHead} teams without a head coach row`])
 
   // ---- opening-night overflow (same rule the bundle applies) -----------------------------------
+  const priorMin = new Map<string, number>()
+  for (const r of all<{ player_id: string; min: number }>(
+    db,
+    `SELECT player_id, SUM(min) AS min FROM player_seasons
+     WHERE year_end = ? AND season_type = 'regular' GROUP BY player_id`,
+    [y - 1],
+  ))
+    priorMin.set(r.player_id, r.min)
+  const weight = new Map<string, number>()
+  for (const r of ro) {
+    const id = String(r.player_id)
+    weight.set(
+      id,
+      capWeight({
+        priorMin: priorMin.get(id) ?? 0,
+        yearEnd: y,
+        howAcquired: r.how_acquired,
+      }),
+    )
+  }
   const on = openingNightRosters(
     stints.map((s) => ({
       playerId: s.playerId,
@@ -487,6 +507,8 @@ export async function loadSeason(
       min: s.min,
     })),
     ro.map((r) => ({ playerId: String(r.player_id), teamId: String(r.team_id) })),
+    20,
+    weight,
   )
   if (on.dropped.length > 0)
     gaps.push([

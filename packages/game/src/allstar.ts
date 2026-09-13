@@ -4,7 +4,7 @@
 // New Year's have no All-Star weekend. The exhibition does not touch standings, season totals
 // or injuries — it is a show, then the calendar starts again.
 
-import type { GameInput, PlayerGameInput, Rng } from '@hoops/core'
+import type { GameInput, GameResult, PlayerGameInput, Rng } from '@hoops/core'
 import { addDays } from './dates.ts'
 import type { GameHooks, GameState, LeaguePlayer } from './state.ts'
 
@@ -18,7 +18,13 @@ export interface AllStarBreak {
   date: string
   east: AllStarPick[]
   west: AllStarPick[]
-  result: { eastPts: number; westPts: number; mvpPlayerId: string | null } | null
+  result: {
+    eastPts: number
+    westPts: number
+    mvpPlayerId: string | null
+    /** The exhibition box. Optional so saves from before this was kept still load. */
+    box?: GameResult
+  } | null
 }
 
 /** Mid-February of the season's winter, or null when this calendar has no break. */
@@ -126,6 +132,7 @@ export function holdAllStarBreak(
       eastPts: result.home.pts,
       westPts: result.away.pts,
       mvpPlayerId: mvp?.playerId ?? null,
+      box: { ...result, pbp: [] },
     }
   }
   state.allStar = breakState

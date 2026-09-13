@@ -4,7 +4,6 @@
  * Nothing here judges a deal: `assessTrade` owns legality, the answer and the money, and every
  * number on screen comes straight back from it.
  */
-import { RATING_KEYS } from '@hoops/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { PickRef, TradeAssessment, TradePackage } from '../sim/api.ts'
 import type { IncomingOffer } from '../sim/protocol.ts'
@@ -37,12 +36,10 @@ async function loadSide(
     client.roster(teamId),
     client.picks(teamId),
   ])
-  const byId = new Map(roster.map((r) => [r.player.playerId, r.player]))
+  const byRow = new Map(roster.map((r) => [r.player.playerId, r]))
   const rows = block.map((b) => {
-    const p = byId.get(b.playerId)
-    const ovr = p
-      ? Math.round(RATING_KEYS.reduce((s, k) => s + p.ratings[k], 0) / RATING_KEYS.length)
-      : 0
+    const p = byRow.get(b.playerId)?.player
+    const ovr = byRow.get(b.playerId)?.card.overall ?? 0
     return {
       playerId: b.playerId,
       name: b.name,

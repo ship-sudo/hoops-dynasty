@@ -1,0 +1,228 @@
+/*
+ * The championship recap: club colour, then the film of the year.
+ * Prefixed `sr-`. The hue is the champion's; nothing invents gold that is not theirs.
+ */
+
+.sr-root {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  color: #f4f1ea;
+  background: color-mix(in srgb, var(--sr-pri, #1a1a1a) 42%, #0b0b0c);
+  overflow: auto;
+  animation: sr-fade 360ms var(--ease) both;
+}
+
+.sr-root::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at 50% 18%,
+    color-mix(in srgb, var(--sr-pri, #888) 55%, transparent),
+    transparent 62%
+  );
+  pointer-events: none;
+}
+
+.sr-stage {
+  position: relative;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 48px 28px 24px;
+  text-align: center;
+  min-height: 52vh;
+  transition:
+    min-height 420ms var(--ease),
+    padding 420ms var(--ease);
+}
+
+.sr-root.is-film .sr-stage {
+  min-height: 0;
+  padding: 28px 28px 8px;
+}
+
+.sr-kicker {
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, #f4f1ea 70%, var(--sr-pri, #fff));
+  animation: sr-in 480ms var(--ease) both;
+}
+
+.sr-title {
+  font-family: var(--display);
+  font-size: clamp(42px, 8vw, 92px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.92;
+  margin: 0;
+  text-wrap: balance;
+  animation: sr-title 720ms var(--ease) 90ms both;
+  transition: font-size 420ms var(--ease);
+}
+
+.sr-root.is-film .sr-title {
+  font-size: clamp(28px, 5vw, 48px);
+}
+
+.sr-sub {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  opacity: 0.88;
+  animation: sr-in 500ms var(--ease) 220ms both;
+}
+
+.sr-score {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-top: 8px;
+  font-family: var(--display);
+  font-variant-numeric: tabular-nums;
+  animation: sr-in 560ms var(--ease) 380ms both;
+}
+
+.sr-score .club {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.sr-score .n {
+  font-size: clamp(36px, 6vw, 64px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.sr-score .n.win {
+  color: #fff;
+}
+
+.sr-score .dash {
+  opacity: 0.4;
+  font-size: 28px;
+}
+
+.sr-film {
+  position: relative;
+  width: min(720px, calc(100% - 32px));
+  margin: 0 auto 28px;
+  display: grid;
+  gap: 1px;
+  background: color-mix(in srgb, #fff 12%, transparent);
+  border: 1px solid color-mix(in srgb, #fff 16%, transparent);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.sr-beat {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 12px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, #0b0b0c 55%, transparent);
+  text-align: left;
+  animation: sr-in 420ms var(--ease) both;
+}
+
+.sr-beat .k {
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, #f4f1ea 55%, var(--sr-pri, #fff));
+  padding-top: 3px;
+}
+
+.sr-beat .v {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.sr-beat .note {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.65;
+}
+
+.sr-bar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  padding: 16px 20px 28px;
+}
+
+.sr-bar button {
+  color: #f4f1ea;
+  border-color: color-mix(in srgb, #fff 32%, transparent);
+  background: color-mix(in srgb, #fff 12%, transparent);
+}
+
+.sr-bar button.primary {
+  background: #f4f1ea;
+  color: #111;
+  border-color: transparent;
+}
+
+.sr-bar button.ghost {
+  background: transparent;
+  color: color-mix(in srgb, #f4f1ea 82%, transparent);
+}
+
+@keyframes sr-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sr-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sr-title {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sr-root,
+  .sr-kicker,
+  .sr-title,
+  .sr-sub,
+  .sr-score,
+  .sr-beat {
+    animation: none;
+  }
+}

@@ -4,12 +4,18 @@ import { makeRng, RATING_KEYS, type Ratings } from '@hoops/core'
 import {
   CONDITION_FLOOR,
   conditionAfterReturn,
+  escalateInjury,
   injuryChance,
   injuryOutlook,
+  injuryRisk,
+  isWarning,
   LEAGUE_MISS_SHARE,
+  leftoverAfterSummer,
   lingeringPenalty,
   nextCondition,
+  playThroughRisk,
   rollInjury,
+  rollInjuryAt,
   seasonAvailability,
 } from './index.ts'
 
@@ -28,10 +34,10 @@ function missShare(durability: number, age = 27, mpg = 30, seasons = 400): numbe
   return missed / (seasons * 82)
 }
 
-test('an average player misses about a quarter of the season, as in the real data', () => {
+test('an average player misses about an eighth of the season to injury', () => {
   const share = missShare(50)
   assert.ok(
-    Math.abs(share - LEAGUE_MISS_SHARE) < 0.05,
+    Math.abs(share - LEAGUE_MISS_SHARE) < 0.04,
     `expected ~${LEAGUE_MISS_SHARE}, got ${share.toFixed(3)}`,
   )
 })
@@ -39,8 +45,8 @@ test('an average player misses about a quarter of the season, as in the real dat
 test('durability separates iron men from the fragile', () => {
   const tough = missShare(90)
   const fragile = missShare(20)
-  assert.ok(tough < 0.16, `an iron man should play most nights, missed ${tough.toFixed(3)}`)
-  assert.ok(fragile > 0.32, `a fragile player should miss plenty, missed ${fragile.toFixed(3)}`)
+  assert.ok(tough < 0.08, `an iron man should play most nights, missed ${tough.toFixed(3)}`)
+  assert.ok(fragile > 0.16, `a fragile player should miss plenty, missed ${fragile.toFixed(3)}`)
   assert.ok(fragile > tough * 2)
 })
 
@@ -78,6 +84,17 @@ test('years in the league add injury risk after the eighth season', () => {
 test('injury outlook names a man who barely played last year', () => {
   assert.match(injuryOutlook(50, 28, 7, 18), /injury candidate/i)
   assert.match(injuryOutlook(90, 26, 5), /iron man/i)
+})
+
+test('the games-missed model tracks durability and last year', () => {
+  const avg = injuryRisk(50, 27, 5, 75, 30, 82)
+  const glass = injuryRisk(20, 27, 5, 75, 30, 82)
+  const iron = injuryRisk(90, 26, 5, 80, 30, 82)
+  assert.ok(avg.gamesOut >= 6 && avg.gamesOut <= 14, `typical ~10, got ${avg.gamesOut}`)
+  assert.ok(glass.gamesOut > avg.gamesOut, 'glass bodies miss more')
+  assert.ok(iron.gamesOut < avg.gamesOut, 'iron men miss fewer')
+  assert.equal(injuryRisk(50, 28, 7, 18).label, 'candidate')
+  assert.ok(injuryRisk(50, 27, 5, 75, 24).gamesOut < injuryRisk(50, 27, 5, 75, 40).gamesOut)
 })
 
 test('a 35-year-old on 24 minutes is a managed night, not a pounding', () => {
@@ -161,4 +178,35 @@ test('only serious injuries leave a mark, and it is worse for old players', () =
   const old = lingeringPenalty(acl, 34)
   assert.ok((young.speed ?? 0) < 0)
   assert.ok((old.speed ?? 0) < (young.speed ?? 0))
+})
+
+test('a sprained ankle is a knock, and playing through it climbs the ladder', () => {
+  const rng = makeRng(9)
+  const names = new Set<string>()
+  for (let i = 0; i < 200; i++) names.add(rollInjuryAt(rng, 'knock').name)
+  assert.ok(names.has('sprained ankle'))
+  const knock = rollInjuryAt(makeRng(1), 'knock')
+  assert.equal(isWarning(knock), true)
+  const worse = escalateInjury(makeRng(2), knock)
+  assert.equal(worse.severity, 'strain')
+  assert.ok(worse.games >= 4)
+  const torn = escalateInjury(makeRng(3), escalateInjury(makeRng(3), worse))
+  assert.equal(torn.severity, 'season')
+})
+
+test('the summer covers forty games; a May Achilles is still out in October', () => {
+  assert.equal(leftoverAfterSummer(2, 'knock'), 0)
+  assert.equal(leftoverAfterSummer(10, 'strain'), 0)
+  assert.equal(leftoverAfterSummer(10, 'break'), 0)
+  assert.equal(leftoverAfterSummer(45, 'break'), 5)
+  assert.equal(leftoverAfterSummer(62, 'season'), 22)
+  assert.equal(leftoverAfterSummer(20, 'season'), 0)
+})
+
+test('playing through a warning is risky, and minutes make it worse', () => {
+  const avg = playThroughRisk(30, 1, 50)
+  assert.ok(Math.abs(avg - 0.14) < 0.01, `expected ~0.14, got ${avg}`)
+  assert.ok(playThroughRisk(44, 1, 50) > avg)
+  assert.ok(playThroughRisk(30, 0.65, 50) > avg)
+  assert.ok(playThroughRisk(30, 1, 20) > avg)
 })

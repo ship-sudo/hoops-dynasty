@@ -166,7 +166,7 @@ export function Panel({
 }
 
 export function RatingBar({ label, value }: { label: string; value: number }) {
-  const cls = value >= 70 ? 'bar hi' : value <= 38 ? 'bar lo' : 'bar'
+  const cls = value >= 80 ? 'bar hi' : value <= 68 ? 'bar lo' : 'bar'
   return (
     <>
       <span className="dim">{label}</span>

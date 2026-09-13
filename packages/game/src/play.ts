@@ -3,11 +3,20 @@
 
 import type { GameInput, GameResult, Rng, StatLine, TeamBox, TeamGameInput } from '@hoops/core'
 import { emptyStatLine, nightlyLoad } from '@hoops/core'
-import { conditionAfterReturn, injuryChance, nextCondition, rollInjury } from '@hoops/injury'
+import {
+  conditionAfterReturn,
+  escalateInjury,
+  injuryChance,
+  isWarning,
+  nextCondition,
+  playThroughRisk,
+  rollInjury,
+} from '@hoops/injury'
 import { daysBetween } from './dates.ts'
 import { noteGameRecords } from './history.ts'
 import { effortFor, engagementFor, updateMorale } from './morale.ts'
 import { buildTeamInput } from './rotation.ts'
+import { restoreInjuryCover } from './sit.ts'
 import {
   availabilityOf,
   emptyRecord,
@@ -59,8 +68,10 @@ export interface PlayedGame {
 }
 
 /**
- * An absence is worth a line in the paper once it costs a week. Below that it is a knock, and the
- * league picks up two hundred of those a month; logging them all would bury everything else.
+ * An absence is worth a line in the paper, and a pause on your own roster, once it costs a week.
+ * The same threshold fires again when he is cleared — news, not a lineup job. Cover already
+ * stamped the minutes to put back; healing does that itself. Knocks sit him without stopping
+ * the sim — a jammed finger is not a recap.
  */
 export const NEWSWORTHY_GAMES = 5
 
@@ -73,6 +84,8 @@ export type SimInterrupt =
       games: number
       injuryName: string
       teamId: string
+      /** True when this is a knock: he can dress, but playing him risks a real absence. */
+      warning: boolean
     }
   | {
       kind: 'allstar'
@@ -89,6 +102,29 @@ export type SimInterrupt =
       mvpName: string | null
       userWins: number
       userLosses: number
+    }
+  | {
+      kind: 'champion'
+      yearEnd: number
+      championTeamId: string
+      championName: string
+      runnerUpTeamId: string
+      runnerUpName: string
+      championWins: number
+      runnerUpWins: number
+      /** What the Finals meant for the user. */
+      yours: 'won' | 'finals' | 'out'
+      /** Optional so older interrupts still type-check. */
+      finalsMvpName?: string | null
+    }
+  | {
+      kind: 'return'
+      playerId: string
+      name: string
+      /** Length of the spell he just finished, not games remaining. */
+      games: number
+      injuryName: string
+      teamId: string
     }
 
 const pendingInterrupt = new WeakMap<GameState, SimInterrupt>()
@@ -108,16 +144,17 @@ function rememberUserInjury(
   state: GameState,
   date: string,
   p: LeaguePlayer,
-  injury: { games: number; name: string },
+  injury: { games: number; name: string; severity: string },
 ): void {
-  if (injury.games < NEWSWORTHY_GAMES) return
-  pushLog(state, {
-    date,
-    yearEnd: state.season.yearEnd,
-    kind: 'note',
-    text: `${p.name} (${p.teamId ?? 'FA'}) out ${injury.games} game${injury.games === 1 ? '' : 's'}: ${injury.name}`,
-  })
-  if (p.teamId !== state.userTeamId) return
+  const warning = injury.severity === 'knock'
+  if (injury.games >= NEWSWORTHY_GAMES)
+    pushLog(state, {
+      date,
+      yearEnd: state.season.yearEnd,
+      kind: 'note',
+      text: `${p.name} (${p.teamId ?? 'FA'}) out ${injury.games} game${injury.games === 1 ? '' : 's'}: ${injury.name}`,
+    })
+  if (p.teamId !== state.userTeamId || warning || injury.games < NEWSWORTHY_GAMES) return
   const hit: SimInterrupt = {
     kind: 'injury',
     playerId: p.playerId,
@@ -125,10 +162,41 @@ function rememberUserInjury(
     games: injury.games,
     injuryName: injury.name,
     teamId: p.teamId,
+    warning,
   }
   const prev = pendingInterrupt.get(state)
-  if (prev && prev.kind !== 'injury') return
-  if (!prev || hit.games > prev.games) pendingInterrupt.set(state, hit)
+  if (prev && prev.kind !== 'injury' && prev.kind !== 'return') return
+  if (prev?.kind === 'injury' && hit.games < prev.games) return
+  pendingInterrupt.set(state, hit)
+}
+
+function rememberUserReturn(
+  state: GameState,
+  date: string,
+  p: LeaguePlayer,
+  games: number,
+  injuryName: string,
+): void {
+  if (p.teamId !== state.userTeamId || games < NEWSWORTHY_GAMES) return
+  pushLog(state, {
+    date,
+    yearEnd: state.season.yearEnd,
+    kind: 'note',
+    text: `${p.name} is available again after ${games} game${games === 1 ? '' : 's'} out (${injuryName})`,
+  })
+  const hit: SimInterrupt = {
+    kind: 'return',
+    playerId: p.playerId,
+    name: p.name,
+    games,
+    injuryName,
+    teamId: p.teamId,
+  }
+  const prev = pendingInterrupt.get(state)
+  // A new tear the same night is the more urgent stop. Two returns: keep the longer spell.
+  if (prev && prev.kind !== 'return') return
+  if (prev?.kind === 'return' && prev.games >= games) return
+  pendingInterrupt.set(state, hit)
 }
 
 /**
@@ -167,9 +235,16 @@ function settleAfterGame(
         stamina: p.ratings.stamina,
         ceiling: a.injury ? a.injury.returnCondition : 1,
       })
-      if (a.out === 0) a.sinceReturn = 0
+      if (a.out === 0) {
+        a.sinceReturn = 0
+        restoreInjuryCover(state, p)
+        const spell = a.injury
+        if (spell && !isWarning(spell) && spell.games >= NEWSWORTHY_GAMES)
+          rememberUserReturn(state, date, p, spell.games, spell.name)
+      }
       continue
     }
+    restoreInjuryCover(state, p)
     const played = minutesOf.get(p.playerId) ?? 0
     // A man told to get after it on defence, crash the glass and run the floor covers more ground
     // in the same minutes. He is billed for it here, in recovery and in the injury roll, which is
@@ -184,6 +259,31 @@ function settleAfterGame(
       stamina: p.ratings.stamina,
       ceiling,
     })
+    if (a.playingThrough && a.injury && isWarning(a.injury)) {
+      if (played <= 0) {
+        a.injury = { ...a.injury, games: a.injury.games - 1 }
+        if (a.injury.games <= 0) {
+          a.injury = null
+          a.playingThrough = false
+        }
+        continue
+      }
+      const forced = hooks.injure?.(p)
+      const worse =
+        forced !== undefined
+          ? forced
+          : rng.chance(playThroughRisk(billed, a.condition, p.ratings.durability))
+            ? escalateInjury(rng, a.injury)
+            : null
+      if (!worse) continue
+      a.injury = worse
+      a.out = worse.games
+      a.playingThrough = false
+      a.sinceReturn = 0
+      a.condition = Math.min(a.condition, worse.returnCondition)
+      rememberUserInjury(state, date, p, worse)
+      continue
+    }
     a.sinceReturn = Math.min(99, a.sinceReturn + 1)
     if (a.sinceReturn >= 24) a.injury = null
     if (played <= 0) continue
@@ -253,6 +353,7 @@ export function playGame(
     availability: state.availability ?? {},
     ...(state.staff ? { staff: state.staff } : {}),
     zoneLegal: state.season.era.zoneLegal,
+    date: game.date,
   }
   const input: GameInput = {
     era: state.season.era,
@@ -277,6 +378,20 @@ export function playGame(
     awayPts: result.away.pts,
     overtimes: result.overtimes,
     seasonType,
+  }
+  if (seasonType !== 'regular') {
+    const line = (box: TeamBox, teamId: string) =>
+      box.players
+        .filter((p) => p.min > 0)
+        .map((p) => ({
+          playerId: p.playerId,
+          teamId,
+          pts: p.pts,
+          reb: p.oreb + p.dreb,
+          ast: p.ast,
+          min: p.min,
+        }))
+    summary.players = [...line(result.home, home.teamId), ...line(result.away, away.teamId)]
   }
   if (seasonType === 'regular') {
     const rh = record(state, home.teamId)
@@ -337,6 +452,10 @@ export function playGame(
   // minutes, their share of the ball and the scoreboard after every game they play.
   updateMorale(state, home.teamId)
   updateMorale(state, away.teamId)
+  for (const teamId of [home.teamId, away.teamId]) {
+    const s = state.teamSettings[teamId]
+    if (s?.sitNext?.length) state.teamSettings[teamId] = { ...s, sitNext: [] }
+  }
   state.calendar.results.push(summary)
   return { summary, result }
 }

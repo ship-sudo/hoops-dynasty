@@ -12,6 +12,7 @@
  */
 import type { Rng } from '@hoops/core'
 import {
+  candidates,
   type GameState,
   type LeaguePlayer,
   moodLabel,
@@ -21,7 +22,7 @@ import {
   squadMood,
   wantsOut,
 } from '@hoops/game'
-import type { NewsItem, TradePackage } from './api.ts'
+import type { NewsItem, TradeAssessment, TradePackage } from './api.ts'
 import type { Potentials } from './market.ts'
 import { incomingOffers, tradeBlock, winNowOf } from './trades.ts'
 
@@ -180,17 +181,10 @@ export function weeklyRumours(ctx: RumourContext): NewsItem[] {
   // 4. Who is leading the MVP conversation, once there is a season to talk about.
   const played = state.calendar.results.length
   if (played > 200 && rng.chance(0.5)) {
-    let best: { name: string; teamId: string; score: number } | null = null
-    for (const [playerId, line] of Object.entries(state.stats)) {
-      if (line.gp < 10) continue
-      const record = state.records[line.teamId]
-      const wins = record ? record.wins / Math.max(1, record.wins + record.losses) : 0.5
-      const score =
-        ((line.pts + 1.2 * (line.oreb + line.dreb) + 1.5 * line.ast) / line.gp) * (0.7 + 0.6 * wins)
-      if (best && score <= best.score) continue
-      const player = state.league.players.find((p) => p.playerId === playerId)
-      if (player) best = { name: player.name, teamId: line.teamId, score }
-    }
+    const race = [...candidates(state)].sort(
+      (a, b) => b.mvpVote - a.mvpVote || (a.playerId < b.playerId ? -1 : 1),
+    )
+    const best = race[0]
     if (best) {
       items.push({
         id: id('mvp'),
@@ -209,9 +203,11 @@ export function weeklyRumours(ctx: RumourContext): NewsItem[] {
  * A real offer, not talk: a package an AI club would genuinely accept, put in front of the user.
  * The Trade screen shows the same list, so an alert here is something he can act on.
  */
-export function tradeAlert(
-  ctx: RumourContext,
-): { item: NewsItem; offer: { user: TradePackage; other: TradePackage } } | null {
+export function tradeAlert(ctx: RumourContext): {
+  item: NewsItem
+  offer: { user: TradePackage; other: TradePackage }
+  assessment: TradeAssessment
+} | null {
   const { state, rng, nameOf } = ctx
   const offers = incomingOffers(state, ctx.potentials, rng, 4)
   const pick = offers[0]
@@ -231,8 +227,9 @@ export function tradeAlert(
       date: state.calendar.date,
       kind: 'offer',
       headline: `${nameOf(pick.other.teamId)} have offered you a trade`,
-      body: `They want ${wants}. On the table: ${gives}${picks > 0 ? ` and ${picks} draft pick${picks === 1 ? '' : 's'}` : ''}. Open the trade desk to answer.`,
+      body: `They want ${wants}. On the table: ${gives}${picks > 0 ? ` and ${picks} draft pick${picks === 1 ? '' : 's'}` : ''}. The clock is stopped.`,
     },
     offer: { user: pick.user, other: pick.other },
+    assessment: pick.assessment,
   }
 }

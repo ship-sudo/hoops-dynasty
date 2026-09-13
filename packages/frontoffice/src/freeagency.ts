@@ -177,6 +177,11 @@ export interface MarketOptions {
    * clubs carry more than the minimum, so callers running a league usually pass roster_max - 1.
    */
   fillTo?: number
+  /**
+   * When false, only the named rounds run — no minimum-salary fill. A day of free agency, not the
+   * whole summer.
+   */
+  fill?: boolean
 }
 
 export function runFreeAgency(
@@ -192,6 +197,7 @@ export function runFreeAgency(
   const settings: MarketOptions = typeof opts === 'number' ? { rounds: opts } : opts
   const rounds = settings.rounds ?? 8
   const fillTo = Math.min(settings.fillTo ?? rules.roster_min, rules.roster_max)
+  const fill = settings.fill !== false
   const signings: Signing[] = []
   const remaining = new Map(pool.map((p) => [p.playerId, p]))
   const state = new Map(teams.map((t) => [t.teamId, { ...t, salaries: [...t.salaries] }]))
@@ -233,6 +239,8 @@ export function runFreeAgency(
     }
     if (signedThisRound === 0) break
   }
+
+  if (!fill) return signings
 
   // Fill to the legal minimum. Every team must dress a full squad, so a club short of
   // rules.roster_min keeps signing the best man left at the minimum salary — that is what the

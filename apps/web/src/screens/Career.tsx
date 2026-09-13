@@ -19,6 +19,7 @@ import { useStore } from '../store.tsx'
 import { Modal, Panel, TeamChip } from '../ui/bits.tsx'
 import { ordinal, pct1, per, seasonLabel } from '../ui/format.ts'
 import { PlayerActions } from './PlayerActions.tsx'
+import { PlayerDossier } from './PlayerDossier.tsx'
 
 const thousands = (n: number): string => Math.round(n).toLocaleString('en-US')
 
@@ -26,6 +27,7 @@ const thousands = (n: number): string => Math.round(n).toLocaleString('en-US')
 function badges(flags: number): { label: string; cls: string; title: string }[] {
   const out: { label: string; cls: string; title: string }[] = []
   if (flags & FLAG.champion) out.push({ label: '★', cls: 'win', title: 'Champion' })
+  if (flags & FLAG.fmvp) out.push({ label: 'FMVP', cls: 'win', title: 'Finals MVP' })
   if (flags & FLAG.mvp) out.push({ label: 'MVP', cls: 'warn', title: 'Most Valuable Player' })
   if (flags & FLAG.dpoy)
     out.push({ label: 'DPOY', cls: 'warn', title: 'Defensive Player of the Year' })
@@ -150,199 +152,195 @@ export function PlayerCareer({ playerId, onClose }: { playerId: string; onClose:
       onClose={onClose}
       wide
     >
-      <div
-        style={{
-          padding: 12,
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0,1fr) 320px',
-          gap: 14,
-        }}
-      >
-        <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
-          <Panel
-            title={`Career · ${totals.seasons} season${totals.seasons === 1 ? '' : 's'}`}
-            flush
-          >
-            <div className="table-x">
-              <table className="grid career">
-                <thead>
-                  <tr>
-                    <th className="text">Season</th>
-                    <th className="text">Team</th>
-                    <th>Age</th>
-                    <th title="Games played">GP</th>
-                    <th title="Games started">GS</th>
-                    <th title="Minutes per game">MPG</th>
-                    <th title="Points per game">PPG</th>
-                    <th title="Rebounds per game">RPG</th>
-                    <th title="Assists per game">APG</th>
-                    <th title="Steals per game">SPG</th>
-                    <th title="Blocks per game">BPG</th>
-                    <th title="Field goal percentage">FG%</th>
-                    <th title="Three-point percentage">3P%</th>
-                    <th title="Free throw percentage">FT%</th>
-                    <th className="text" style={{ minWidth: 120 }}>
-                      Honours
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {career.seasons.map((s) => (
-                    <tr key={s.yearEnd}>
-                      <td className="text">{seasonLabel(s.yearEnd)}</td>
-                      <td className="text">
-                        <TeamChip team={teamById.get(s.teamId)} />
-                      </td>
-                      <td className="num dim">{s.age || '—'}</td>
-                      <td className="num">{s.gp}</td>
-                      <td className="num dim">{s.gs}</td>
-                      <td className="num">{per(s.min, s.gp)}</td>
-                      <td className="num">{per(s.pts, s.gp)}</td>
-                      <td className="num">{per(s.oreb + s.dreb, s.gp)}</td>
-                      <td className="num">{per(s.ast, s.gp)}</td>
-                      <td className="num dim">{per(s.stl, s.gp)}</td>
-                      <td className="num dim">{per(s.blk, s.gp)}</td>
-                      <td className="num dim">{s.fga ? pct1(s.fgm / s.fga) : '—'}</td>
-                      <td className="num dim">{s.fg3a ? pct1(s.fg3m / s.fg3a) : '—'}</td>
-                      <td className="num dim">{s.fta ? pct1(s.ftm / s.fta) : '—'}</td>
-                      <td className="text">
-                        {badges(s.flags).map((b) => (
-                          <span key={b.label} className={`badge ${b.cls}`} title={b.title}>
-                            {b.label}
-                          </span>
-                        ))}
-                      </td>
-                    </tr>
-                  ))}
-                  {career.seasons.length === 0 ? (
+      <div className="pc" style={{ padding: 12 }}>
+        <PlayerDossier playerId={playerId} />
+        <div className="pc-body">
+          <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
+            <Panel
+              title={`Career · ${totals.seasons} season${totals.seasons === 1 ? '' : 's'}`}
+              flush
+            >
+              <div className="table-x">
+                <table className="grid career">
+                  <thead>
                     <tr>
-                      <td className="text dim" colSpan={15}>
-                        He has not played a professional game yet.
-                      </td>
+                      <th className="text">Season</th>
+                      <th className="text">Team</th>
+                      <th>Age</th>
+                      <th title="Games played">GP</th>
+                      <th title="Games started">GS</th>
+                      <th title="Minutes per game">MPG</th>
+                      <th title="Points per game">PPG</th>
+                      <th title="Rebounds per game">RPG</th>
+                      <th title="Assists per game">APG</th>
+                      <th title="Steals per game">SPG</th>
+                      <th title="Blocks per game">BPG</th>
+                      <th title="Field goal percentage">FG%</th>
+                      <th title="Three-point percentage">3P%</th>
+                      <th title="Free throw percentage">FT%</th>
+                      <th className="text" style={{ minWidth: 120 }}>
+                        Honours
+                      </th>
                     </tr>
-                  ) : (
-                    <tr className="sep totals">
-                      <td className="text">Career</td>
-                      <td className="text dim">
-                        {totals.teams.length} club{totals.teams.length === 1 ? '' : 's'}
-                      </td>
-                      <td className="num dim">—</td>
-                      <td className="num">{thousands(totals.gp)}</td>
-                      <td className="num dim">{thousands(totals.gs)}</td>
-                      <td className="num">{per(totals.min, totals.gp)}</td>
-                      <td className="num">{per(totals.pts, totals.gp)}</td>
-                      <td className="num">{per(totals.reb, totals.gp)}</td>
-                      <td className="num">{per(totals.ast, totals.gp)}</td>
-                      <td className="num dim">{per(totals.stl, totals.gp)}</td>
-                      <td className="num dim">{per(totals.blk, totals.gp)}</td>
-                      <td className="num dim">
-                        {totals.fga ? pct1(totals.fgm / totals.fga) : '—'}
-                      </td>
-                      <td className="num dim">
-                        {totals.fg3a ? pct1(totals.fg3m / totals.fg3a) : '—'}
-                      </td>
-                      <td className="num dim">
-                        {totals.fta ? pct1(totals.ftm / totals.fta) : '—'}
-                      </td>
-                      <td className="text dim">
-                        {thousands(totals.pts)} pts · {thousands(totals.reb)} reb ·{' '}
-                        {thousands(totals.ast)} ast
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-        </div>
-
-        <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
-          <PlayerActions playerId={playerId} onChanged={onClose} />
-          {hall ? (
-            <Panel title={`Hall of Fame · ${hall.year}`}>
-              <p style={{ margin: 0 }}>{hall.case}</p>
-            </Panel>
-          ) : null}
-
-          <Panel title="The short version">
-            <dl className="kv">
-              <dt>Seasons</dt>
-              <dd className="num">
-                {totals.seasons}
-                {career.seasons.length ? (
-                  <span className="dim">
-                    {' '}
-                    · {seasonLabel(career.seasons[0]?.yearEnd ?? 0)} to{' '}
-                    {seasonLabel(career.seasons[career.seasons.length - 1]?.yearEnd ?? 0)}
-                  </span>
-                ) : null}
-              </dd>
-              <dt>Peak</dt>
-              <dd>
-                {peak ? (
-                  <>
-                    {seasonLabel(peak.yearEnd)} —{' '}
-                    <span className="num">{per(peak.pts, peak.gp)}</span> pts,{' '}
-                    <span className="num">{per(peak.oreb + peak.dreb, peak.gp)}</span> reb,{' '}
-                    <span className="num">{per(peak.ast, peak.gp)}</span> ast
-                  </>
-                ) : (
-                  '—'
-                )}
-              </dd>
-              <dt>Drafted</dt>
-              <dd>
-                {career.draft
-                  ? `${career.draft.year} · round ${career.draft.round}, pick ${career.draft.pick}`
-                  : 'Undrafted'}
-              </dd>
-              <dt>Clubs</dt>
-              <dd>
-                {totals.teams.length === 0
-                  ? '—'
-                  : totals.teams.map((id) => (
-                      <span key={id} style={{ marginRight: 6 }}>
-                        <TeamChip team={teamById.get(id)} />
-                      </span>
+                  </thead>
+                  <tbody>
+                    {career.seasons.map((s) => (
+                      <tr key={s.yearEnd}>
+                        <td className="text">{seasonLabel(s.yearEnd)}</td>
+                        <td className="text">
+                          <TeamChip team={teamById.get(s.teamId)} />
+                        </td>
+                        <td className="num dim">{s.age || '—'}</td>
+                        <td className="num">{s.gp}</td>
+                        <td className="num dim">{s.gs}</td>
+                        <td className="num">{per(s.min, s.gp)}</td>
+                        <td className="num">{per(s.pts, s.gp)}</td>
+                        <td className="num">{per(s.oreb + s.dreb, s.gp)}</td>
+                        <td className="num">{per(s.ast, s.gp)}</td>
+                        <td className="num dim">{per(s.stl, s.gp)}</td>
+                        <td className="num dim">{per(s.blk, s.gp)}</td>
+                        <td className="num dim">{s.fga ? pct1(s.fgm / s.fga) : '—'}</td>
+                        <td className="num dim">{s.fg3a ? pct1(s.fg3m / s.fg3a) : '—'}</td>
+                        <td className="num dim">{s.fta ? pct1(s.ftm / s.fta) : '—'}</td>
+                        <td className="text">
+                          {badges(s.flags).map((b) => (
+                            <span key={b.label} className={`badge ${b.cls}`} title={b.title}>
+                              {b.label}
+                            </span>
+                          ))}
+                        </td>
+                      </tr>
                     ))}
-              </dd>
-              <dt>Titles</dt>
-              <dd className="num">{totals.titles}</dd>
-              <dt>MVP</dt>
-              <dd className="num">{totals.mvps}</dd>
-              <dt>All-NBA</dt>
-              <dd className="num">{totals.allNba}</dd>
-              <dt>DPOY</dt>
-              <dd className="num">{totals.dpoys}</dd>
-            </dl>
-            {isOneClubMan(career) ? (
-              <p className="warn" style={{ marginBottom: 0, marginTop: 8 }}>
-                A one-club man: {totals.seasons} seasons, one shirt
-                {mainTeam ? `, ${mainTeam.city} ${mainTeam.name}` : ''}.
-              </p>
-            ) : null}
-          </Panel>
-
-          {mainTeam ? (
-            <Panel title={`Where he ranks at ${mainTeam.city} ${mainTeam.name}`} flush>
-              <table className="grid">
-                <tbody>
-                  {ranks.map((r) => (
-                    <tr key={r.key}>
-                      <td className="text">{RANK_LABEL[r.key]}</td>
-                      <td className="num">{thousands(r.value)}</td>
-                      <td className={r.rank <= 5 ? 'num win' : 'num dim'}>
-                        {r.rank > 0 ? `${ordinal(r.rank)} of ${r.of}` : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="faint" style={{ fontSize: 11, padding: '6px 10px', margin: 0 }}>
-                All-time club lists, counting only the seasons he spent here.
-              </p>
+                    {career.seasons.length === 0 ? (
+                      <tr>
+                        <td className="text dim" colSpan={15}>
+                          He has not played a professional game yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr className="sep totals">
+                        <td className="text">Career</td>
+                        <td className="text dim">
+                          {totals.teams.length} club{totals.teams.length === 1 ? '' : 's'}
+                        </td>
+                        <td className="num dim">—</td>
+                        <td className="num">{thousands(totals.gp)}</td>
+                        <td className="num dim">{thousands(totals.gs)}</td>
+                        <td className="num">{per(totals.min, totals.gp)}</td>
+                        <td className="num">{per(totals.pts, totals.gp)}</td>
+                        <td className="num">{per(totals.reb, totals.gp)}</td>
+                        <td className="num">{per(totals.ast, totals.gp)}</td>
+                        <td className="num dim">{per(totals.stl, totals.gp)}</td>
+                        <td className="num dim">{per(totals.blk, totals.gp)}</td>
+                        <td className="num dim">
+                          {totals.fga ? pct1(totals.fgm / totals.fga) : '—'}
+                        </td>
+                        <td className="num dim">
+                          {totals.fg3a ? pct1(totals.fg3m / totals.fg3a) : '—'}
+                        </td>
+                        <td className="num dim">
+                          {totals.fta ? pct1(totals.ftm / totals.fta) : '—'}
+                        </td>
+                        <td className="text dim">
+                          {thousands(totals.pts)} pts · {thousands(totals.reb)} reb ·{' '}
+                          {thousands(totals.ast)} ast
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </Panel>
-          ) : null}
+          </div>
+
+          <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
+            <PlayerActions playerId={playerId} onChanged={onClose} />
+            {hall ? (
+              <Panel title={`Hall of Fame · ${hall.year}`}>
+                <p style={{ margin: 0 }}>{hall.case}</p>
+              </Panel>
+            ) : null}
+
+            <Panel title="The short version">
+              <dl className="kv">
+                <dt>Seasons</dt>
+                <dd className="num">
+                  {totals.seasons}
+                  {career.seasons.length ? (
+                    <span className="dim">
+                      {' '}
+                      · {seasonLabel(career.seasons[0]?.yearEnd ?? 0)} to{' '}
+                      {seasonLabel(career.seasons[career.seasons.length - 1]?.yearEnd ?? 0)}
+                    </span>
+                  ) : null}
+                </dd>
+                <dt>Peak</dt>
+                <dd>
+                  {peak ? (
+                    <>
+                      {seasonLabel(peak.yearEnd)} —{' '}
+                      <span className="num">{per(peak.pts, peak.gp)}</span> pts,{' '}
+                      <span className="num">{per(peak.oreb + peak.dreb, peak.gp)}</span> reb,{' '}
+                      <span className="num">{per(peak.ast, peak.gp)}</span> ast
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </dd>
+                <dt>Drafted</dt>
+                <dd>
+                  {career.draft
+                    ? `${career.draft.year} · round ${career.draft.round}, pick ${career.draft.pick}`
+                    : 'Undrafted'}
+                </dd>
+                <dt>Clubs</dt>
+                <dd>
+                  {totals.teams.length === 0
+                    ? '—'
+                    : totals.teams.map((id) => (
+                        <span key={id} style={{ marginRight: 6 }}>
+                          <TeamChip team={teamById.get(id)} />
+                        </span>
+                      ))}
+                </dd>
+                <dt>Titles</dt>
+                <dd className="num">{totals.titles}</dd>
+                <dt>MVP</dt>
+                <dd className="num">{totals.mvps}</dd>
+                <dt>All-NBA</dt>
+                <dd className="num">{totals.allNba}</dd>
+                <dt>DPOY</dt>
+                <dd className="num">{totals.dpoys}</dd>
+              </dl>
+              {isOneClubMan(career) ? (
+                <p className="warn" style={{ marginBottom: 0, marginTop: 8 }}>
+                  A one-club man: {totals.seasons} seasons, one shirt
+                  {mainTeam ? `, ${mainTeam.city} ${mainTeam.name}` : ''}.
+                </p>
+              ) : null}
+            </Panel>
+
+            {mainTeam ? (
+              <Panel title={`Where he ranks at ${mainTeam.city} ${mainTeam.name}`} flush>
+                <table className="grid">
+                  <tbody>
+                    {ranks.map((r) => (
+                      <tr key={r.key}>
+                        <td className="text">{RANK_LABEL[r.key]}</td>
+                        <td className="num">{thousands(r.value)}</td>
+                        <td className={r.rank <= 5 ? 'num win' : 'num dim'}>
+                          {r.rank > 0 ? `${ordinal(r.rank)} of ${r.of}` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="faint" style={{ fontSize: 11, padding: '6px 10px', margin: 0 }}>
+                  All-time club lists, counting only the seasons he spent here.
+                </p>
+              </Panel>
+            ) : null}
+          </div>
         </div>
       </div>
     </Modal>

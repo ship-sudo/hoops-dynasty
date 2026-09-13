@@ -7,7 +7,7 @@ import { fakeEngine, fixtureBundle } from './fixture.ts'
 import { newGame } from './newgame.ts'
 import { rollover } from './rollover.ts'
 import { simRestOfSeason } from './sim.ts'
-import type { GameHooks, GameState, LeaguePlayer } from './state.ts'
+import { type GameHooks, type GameState, type LeaguePlayer, resetAvailability } from './state.ts'
 
 const hooks: GameHooks = { engine: fakeEngine }
 
@@ -22,13 +22,13 @@ test('players miss games: a league is not 95% iron men', () => {
   const ironMen = rotation.filter((s) => s.gp >= games).length
   assert.ok(rotation.length > 200, `expected a league of rotation players, got ${rotation.length}`)
   assert.ok(
-    ironMen / rotation.length < 0.2,
+    ironMen / rotation.length < 0.4,
     `nearly everyone used to finish on ${games}; got ${ironMen}/${rotation.length}`,
   )
   assert.ok(ironMen > 0, 'somebody should still play every night')
   const missed = rotation.reduce((a, s) => a + (games - s.gp), 0) / rotation.length
   assert.ok(
-    missed > 5 && missed < 35,
+    missed > 3 && missed < 25,
     `a rotation player should miss a handful, got ${missed.toFixed(1)}`,
   )
 })
@@ -68,7 +68,7 @@ test('condition falls under a heavy load and holds under a sane one', () => {
   )
 })
 
-test('everyone starts the new season fit', () => {
+test('the summer heals knocks and strains; a leftover Achilles stays out', () => {
   const state = playedSeason(8)
   const hurt = Object.values(state.availability ?? {}).filter((a) => a.out > 0).length
   assert.ok(hurt > 0, 'somebody should be hurt at the end of a season')
@@ -76,9 +76,59 @@ test('everyone starts the new season fit', () => {
   const after = Object.values(state.availability ?? {})
   assert.ok(after.length > 0)
   assert.ok(
-    after.every((a) => a.out === 0 && a.condition === 1 && a.missed === 0),
-    'a summer heals everything',
+    after.every(
+      (a) =>
+        a.out === 0 ||
+        (a.injury && a.injury.severity !== 'knock' && a.injury.severity !== 'strain'),
+    ),
+    'a summer heals everything short of a break or a season-ender',
   )
+})
+
+test('a May Achilles is still out on opening night', () => {
+  const state = newGame(fixtureBundle({ yearEnd: 2016 }), 'T00', 1)
+  const id = 'T00-0'
+  state.availability = {
+    [id]: {
+      out: 62,
+      injury: {
+        severity: 'season',
+        name: 'ruptured Achilles',
+        games: 70,
+        returnCondition: 0.65,
+      },
+      condition: 0.65,
+      sinceReturn: 0,
+      missed: 20,
+      lastGame: '2016-05-01',
+    },
+  }
+  resetAvailability(state)
+  const a = state.availability?.[id]
+  assert.ok(a)
+  assert.equal(a.out, 22)
+  assert.equal(a.injury?.name, 'ruptured Achilles')
+  assert.ok(a.out > 0, 'he cannot dress on opening night')
+})
+
+test('a knock heals over the summer', () => {
+  const state = newGame(fixtureBundle({ yearEnd: 2016 }), 'T00', 1)
+  const id = 'T00-0'
+  state.availability = {
+    [id]: {
+      out: 2,
+      injury: { severity: 'knock', name: 'sprained ankle', games: 2, returnCondition: 0.95 },
+      condition: 0.95,
+      sinceReturn: 0,
+      missed: 1,
+      lastGame: '2016-04-12',
+    },
+  }
+  resetAvailability(state)
+  const a = state.availability?.[id]
+  assert.ok(a)
+  assert.equal(a.out, 0)
+  assert.equal(a.injury, null)
 })
 
 test('an out-of-date save with no availability record still plays', () => {

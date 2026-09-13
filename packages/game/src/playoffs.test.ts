@@ -65,6 +65,17 @@ test('the bracket is fixed, not reseeded', () => {
   assert.ok([east1[0]?.winnerTeamId, east1[3]?.winnerTeamId].includes(pair.lowTeamId))
   assert.ok(po.championTeamId)
   assert.notEqual(po.championTeamId, po.runnerUpTeamId)
+  assert.equal(r.interrupt?.kind, 'champion')
+  assert.equal(r.state.awards?.finalsMvp?.teamId, po.championTeamId)
+  assert.ok(r.state.awards?.finalsLeaders?.pts)
+  assert.ok(r.interrupt?.kind === 'champion' && r.interrupt.finalsMvpName)
+  if (r.interrupt?.kind === 'champion') {
+    assert.equal(r.interrupt.championTeamId, po.championTeamId)
+    assert.equal(r.interrupt.runnerUpTeamId, po.runnerUpTeamId)
+    assert.equal(r.interrupt.championWins, 4)
+    assert.ok(r.interrupt.runnerUpWins >= 0 && r.interrupt.runnerUpWins <= 3)
+    assert.ok(['won', 'finals', 'out'].includes(r.interrupt.yours))
+  }
 })
 
 test('home court patterns are era-correct', () => {

@@ -10,9 +10,10 @@
  * already knows.
  */
 import type { GameResult, TeamBox } from '@hoops/core'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
   AwardRace,
+  DressingRow,
   GamePreview,
   LeaderRow,
   NewsItem,
@@ -26,6 +27,8 @@ import { Panel, TeamChip } from '../ui/bits.tsx'
 import { addDays, longDate, n1, ordinal, shortDate, signed1, streakText } from '../ui/format.ts'
 import { useBoxScore } from './BoxScore.tsx'
 import { barWidth, Form, priVar, useCareerModal } from './leaguebits.tsx'
+import { SeasonRecap } from './SeasonRecap.tsx'
+import { SeasonWrap } from './SeasonWrap.tsx'
 import { verdict } from './verdict.ts'
 
 /** The three boards a fan checks first. More than that belongs on the League screen. */
@@ -37,6 +40,61 @@ const BRIEF = [
 
 function topScorers(box: TeamBox, n: number) {
   return [...box.players].sort((a, b) => b.pts - a.pts).slice(0, n)
+}
+
+const SIT_WHY: Record<string, string> = {
+  bench: 'Inactive',
+  hurt: 'Out',
+  sat: 'Sat tonight',
+  b2b: 'Back-to-back',
+  tired: 'Load manage',
+}
+
+function DressingList({
+  rows,
+  disabled,
+  onSit,
+  onOpen,
+}: {
+  rows: DressingRow[]
+  disabled: boolean
+  onSit: (id: string, sit: boolean) => void
+  onOpen: (id: string) => void
+}) {
+  return (
+    <div className="lg-dress">
+      <div className="k">Twelve dress · sit is one game</div>
+      <ul>
+        {rows.map((r) => {
+          const canToggle = r.why == null || r.why === 'sat'
+          return (
+            <li key={r.playerId} className={r.sitting ? 'out' : undefined}>
+              <span className="pos">{r.pos}</span>
+              <button type="button" className="lg-link nm" onClick={() => onOpen(r.playerId)}>
+                {r.name}
+              </button>
+              <span className="risk" title={r.riskText}>
+                {r.risk}
+              </span>
+              <span className="why">{r.sitting ? (SIT_WHY[r.why ?? ''] ?? r.why) : null}</span>
+              {canToggle ? (
+                <button
+                  type="button"
+                  className="ghost tiny"
+                  disabled={disabled}
+                  onClick={() => onSit(r.playerId, !r.sitting)}
+                >
+                  {r.sitting ? 'Play' : 'Sit tonight'}
+                </button>
+              ) : (
+                <span />
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
 }
 
 /** One side of tonight's scoreboard card. */
@@ -150,7 +208,18 @@ function SeriesStory({
 }
 
 export function Home() {
-  const { client, snapshot, teamById, advance, advanceTo, busy, setScreen } = useStore()
+  const {
+    client,
+    snapshot,
+    teamById,
+    advance,
+    advanceTo,
+    skipSim,
+    setAutoLineup,
+    busy,
+    setScreen,
+    game,
+  } = useStore()
   const openBox = useBoxScore()
   const [career, openCareer] = useCareerModal()
   const [games, setGames] = useState<ScheduleEntry[]>([])
@@ -161,6 +230,8 @@ export function Home() {
   const [race, setRace] = useState<AwardRace | null>(null)
   const [brief, setBrief] = useState<LeaderRow[][]>([])
   const [squad, setSquad] = useState<RosterRow[]>([])
+  const [recap, setRecap] = useState(false)
+  const [wrap, setWrap] = useState(false)
 
   const state = snapshot?.state
   const me = state?.userTeamId
@@ -241,6 +312,15 @@ export function Home() {
     }
   }, [client, lastGame])
 
+  const sitTonight = useCallback(
+    async (playerId: string, sit: boolean) => {
+      await client.manager('sitTonight', playerId, sit)
+      const next = await client.manager<GamePreview | null>('nextGame').catch(() => null)
+      setPreview(next)
+    },
+    [client],
+  )
+
   /**
    * The inbox. The sim's own log carries league business (trades, injuries, rumours, real offers);
    * the results of your own games come off the schedule, so the mail is never empty after a game.
@@ -294,6 +374,8 @@ export function Home() {
   const po = preview?.playoff ?? null
   /** The story to tell when there is no game to play: knocked out, missed it, or won it. */
   const over = post && post.kind !== 'playing' ? post : null
+  const canWrap = Boolean(game?.awards)
+  const wonIt = over?.kind === 'champion'
 
   return (
     <div className="lg-home">
@@ -302,7 +384,9 @@ export function Home() {
         <Panel
           title={
             state.seasonComplete
-              ? 'The season is over'
+              ? over?.kind === 'champion'
+                ? 'Champions'
+                : 'The season is over'
               : po
                 ? `${po.title}${po.kind === 'series' ? ` · Game ${po.gameNumber}` : ''}`
                 : preview
@@ -312,8 +396,15 @@ export function Home() {
                     : 'Next up'
           }
           actions={
-            <span className="dim" style={{ fontSize: 11 }}>
-              {longDate(state.date)} · {state.seasonId}
+            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {canWrap ? (
+                <button type="button" className="ghost" onClick={() => setWrap(true)}>
+                  Season wrap-up
+                </button>
+              ) : null}
+              <span className="dim" style={{ fontSize: 11 }}>
+                {longDate(state.date)} · {state.seasonId}
+              </span>
             </span>
           }
         >
@@ -326,11 +417,27 @@ export function Home() {
                     : off.phase === 'draft'
                       ? 'The draft is waiting on you.'
                       : off.phase === 'freeagency'
-                        ? 'The free-agent market is open.'
+                        ? 'Look at your team, re-sign your own, then the market.'
                         : 'The new season is ready.'
                   : 'The regular season is done.'}
               </strong>{' '}
               {over ? `${over.headline} ${over.detail} ` : null}
+              {canWrap ? (
+                <>
+                  <button type="button" className="lg-link" onClick={() => setWrap(true)}>
+                    Season wrap-up
+                  </button>
+                  {' · '}
+                </>
+              ) : null}
+              {wonIt ? (
+                <>
+                  <button type="button" className="lg-link" onClick={() => setRecap(true)}>
+                    Watch the recap
+                  </button>
+                  {' · '}
+                </>
+              ) : null}
               <button type="button" className="lg-link" onClick={() => setScreen('playoffs')}>
                 See the bracket
               </button>
@@ -400,6 +507,15 @@ export function Home() {
                   </>
                 )}
               </p>
+
+              {preview.dressing && preview.dressing.length > 0 ? (
+                <DressingList
+                  rows={preview.dressing}
+                  disabled={Boolean(busy)}
+                  onSit={(id, sit) => void sitTonight(id, sit)}
+                  onOpen={openCareer}
+                />
+              ) : null}
             </>
           ) : over ? (
             <div className="lg-out">
@@ -457,16 +573,24 @@ export function Home() {
             <button
               type="button"
               disabled={Boolean(busy) || state.seasonComplete}
-              onClick={() => advance(7)}
+              onClick={() => advance(7, 'week')}
             >
               Sim week
             </button>
             <button
               type="button"
               disabled={Boolean(busy) || state.seasonComplete}
-              onClick={() => advanceTo(addDays(state.date, 30))}
+              onClick={() => advanceTo(addDays(state.date, 30), 'month')}
             >
               Sim month
+            </button>
+            <button
+              type="button"
+              disabled={Boolean(busy) || state.seasonComplete}
+              onClick={() => advance(7, 'soft')}
+              title="Same week, much slower — watch each night land"
+            >
+              Soft sim
             </button>
             <button
               type="button"
@@ -478,7 +602,26 @@ export function Home() {
             </button>
           </div>
 
-          <div className="progress" style={{ marginTop: 10 }} aria-hidden={!busy}>
+          <label className="checkline sim-auto" style={{ marginTop: 10 }}>
+            <input
+              type="checkbox"
+              checked={Boolean(state.autoLineup)}
+              disabled={state.seasonComplete}
+              onChange={(e) => void setAutoLineup(e.currentTarget.checked)}
+            />
+            Computer sets lineups
+          </label>
+          <p className="faint" style={{ fontSize: 11, margin: '4px 0 0' }}>
+            {state.autoLineup
+              ? 'Injuries and returns get a new rotation. Week, month and soft sim keep going.'
+              : 'You handle the rotation when someone goes down or comes back.'}
+          </p>
+
+          <div
+            className={`progress${busy && busy.total > 1 ? ' watching' : ''}`}
+            style={{ marginTop: 10 }}
+            aria-hidden={!busy}
+          >
             <span
               className="fill"
               style={{
@@ -489,10 +632,20 @@ export function Home() {
               }}
             />
           </div>
-          <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
-            {busy
-              ? `${busy.label} · ${busy.done}/${busy.total}`
-              : `${state.gamesPlayed} of ${state.gamesTotal} games played across the league`}
+          <div
+            className="faint"
+            style={{ fontSize: 11, marginTop: 4, display: 'flex', gap: 10, alignItems: 'center' }}
+          >
+            <span>
+              {busy
+                ? `${busy.label} · ${busy.done}/${busy.total}`
+                : `${state.gamesPlayed} of ${state.gamesTotal} games played across the league`}
+            </span>
+            {busy && busy.total > 1 ? (
+              <button type="button" className="lg-link" onClick={skipSim}>
+                Skip ▸
+              </button>
+            ) : null}
           </div>
         </Panel>
 
@@ -741,11 +894,17 @@ export function Home() {
         </Panel>
 
         <Panel
-          title="MVP race"
+          title={game?.awards ? 'Awards' : 'MVP race'}
           actions={
-            <button type="button" className="ghost" onClick={() => setScreen('awards')}>
-              All races
-            </button>
+            game?.awards ? (
+              <button type="button" className="ghost" onClick={() => setWrap(true)}>
+                Season wrap-up
+              </button>
+            ) : (
+              <button type="button" className="ghost" onClick={() => setScreen('awards')}>
+                All races
+              </button>
+            )
           }
         >
           {mvp.length === 0 ? (
@@ -894,6 +1053,32 @@ export function Home() {
       </div>
 
       {career}
+      {wrap ? (
+        <SeasonWrap
+          onClose={() => setWrap(false)}
+          onPlayoffs={() => {
+            setWrap(false)
+            setScreen('playoffs')
+          }}
+          onOffseason={() => {
+            setWrap(false)
+            setScreen('offseason')
+          }}
+        />
+      ) : null}
+      {recap ? (
+        <SeasonRecap
+          onClose={() => setRecap(false)}
+          onContinue={() => {
+            setRecap(false)
+            setScreen('offseason')
+          }}
+          onBracket={() => {
+            setRecap(false)
+            setScreen('playoffs')
+          }}
+        />
+      ) : null}
     </div>
   )
 }

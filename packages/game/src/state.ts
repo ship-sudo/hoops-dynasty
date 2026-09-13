@@ -6,6 +6,7 @@ import type {
   EraContext,
   EraRules,
   NamedLineups,
+  NamedUnitStyles,
   OffenseSystemId,
   PlayerInstruction,
   Position,
@@ -17,7 +18,7 @@ import type {
   Tendencies,
   YearEnd,
 } from '@hoops/core'
-import type { Injury } from '@hoops/injury'
+import { type Injury, leftoverAfterSummer } from '@hoops/injury'
 import type { AllStarBreak } from './allstar.ts'
 // Types only, so the cycle with history.ts is erased at compile time.
 import type { GameRecord, HallOfFamer } from './history.ts'
@@ -81,6 +82,17 @@ export interface PlayerAvailability {
   missed: number
   /** Date of his team's last game, so rest days are real days and not a guess. */
   lastGame: string | null
+  /**
+   * He is dressing on a warning (a knock). Optional so old saves load as "sitting the spell".
+   * Playing through is how a sprain becomes a tear.
+   */
+  playingThrough?: boolean
+  /**
+   * Minutes he had when the computer covered this injury. Presence means "put him back when
+   * `out` hits 0"; a manager who benched him on purpose never gets this stamp. Optional so
+   * old saves load as uncovered.
+   */
+  heldMinutes?: number
 }
 
 export interface SeasonStatLine extends StatLine {
@@ -106,6 +118,16 @@ export interface TeamRecord {
 export type SeasonType = 'regular' | 'playin' | 'playoffs'
 
 /** One finished game. Box scores are not kept in the save; season totals are. */
+/** One man's line in a game. Optional on GameSummary so old saves load. */
+export interface GameLine {
+  playerId: string
+  teamId: string
+  pts: number
+  reb: number
+  ast: number
+  min: number
+}
+
 export interface GameSummary {
   gameId: string
   date: string
@@ -115,6 +137,8 @@ export interface GameSummary {
   awayPts: number
   overtimes: number
   seasonType: SeasonType
+  /** Playoff and play-in lines. Absent on regular-season games and on old saves. */
+  players?: GameLine[]
 }
 
 export interface ScheduledGame {
@@ -196,12 +220,25 @@ export interface AwardWinner {
   score: number
 }
 
+export interface FinalsLeaders {
+  pts: AwardWinner | null
+  reb: AwardWinner | null
+  ast: AwardWinner | null
+}
+
 export interface SeasonAwards {
   mvp: AwardWinner | null
   roy: AwardWinner | null
   dpoy: AwardWinner | null
   /** Three teams of five, best first. Positional (2G/2F/1C) before 2023-24, positionless after. */
   allNba: AwardWinner[][]
+  /**
+   * Named when the Finals end. Optional so old saves and seasons that never reached a champion
+   * still load. The winner is always a man on the champion.
+   */
+  finalsMvp?: AwardWinner | null
+  /** Champion's Finals scoring, rebounding and assist leaders. Per-game rates in `score`. */
+  finalsLeaders?: FinalsLeaders
 }
 
 export interface SeasonSummary {
@@ -260,10 +297,24 @@ export interface TeamSettings {
    * complete five) means the coach puts those groups on the floor by situation.
    */
   lineups?: NamedLineups
+  /**
+   * How each named five plays. Optional so old saves load. Missing a unit means it uses
+   * the team instructions — a second unit that lights it up is an opt-in, not a default.
+   */
+  unitTactics?: NamedUnitStyles
   /** The offensive system. Absent or 'balanced' means no system: every man plays his own game. */
   system?: OffenseSystemId
   /** Per-player coaching instructions, by player id. Missing or neutral means "play your game". */
   instructions?: Record<string, PlayerInstruction>
+  /**
+   * How often he dresses. Absent = every game he is fit. Optional so old saves load.
+   * `b2b` sits the second night of a back-to-back. `manage` also sits him when he is tired.
+   */
+  rest?: Record<string, 'b2b' | 'manage'>
+  /**
+   * Sit these men the next time this club plays, then clear. One-game holds. Optional so old saves load.
+   */
+  sitNext?: string[]
 }
 
 export interface GameState {
@@ -340,7 +391,16 @@ export interface GameState {
    * roster count; the rest are ignored.
    */
   listed?: string[]
+  /**
+   * Guaranteed salary still on the cap after a waiver, by team. Optional so old saves load.
+   */
+  deadMoney?: { teamId: string; amount: number; yearEnd: number }[]
   log: LogEvent[]
+  /**
+   * When true, injuries and returns on your roster rewrite the rotation and do not pause a
+   * multi-day sim. Optional so old saves load as "I handle the lineup".
+   */
+  autoLineup?: boolean
   /** Per-team coaching settings. Only teams the user has touched need an entry. */
   teamSettings: Record<string, TeamSettings>
   /**
@@ -396,13 +456,16 @@ export function rosterOf(state: GameState, teamId: string): LeaguePlayer[] {
   return state.league.players.filter((p) => p.teamId === teamId)
 }
 
-/** Total salary on the books this season. Cap holds and exceptions are Phase 4. */
+/** Total salary on the books this season, including dead money from waivers. */
 export function payrollOf(state: GameState, teamId: string): number {
   let total = 0
   for (const p of state.league.players) {
     if (p.teamId !== teamId || !p.contract) continue
     const y = p.contract.years.find((yr) => yr.yearEnd === state.season.yearEnd)
     if (y) total += y.amount
+  }
+  for (const d of state.deadMoney ?? []) {
+    if (d.teamId === teamId && d.yearEnd === state.season.yearEnd) total += d.amount
   }
   return total
 }
@@ -423,10 +486,31 @@ export function availabilityOf(state: GameState, playerId: string): PlayerAvaila
   return a
 }
 
-/** Everyone starts a season fit. Summers are long enough to heal anything. */
+/** Everyone starts a season fit, except a leftover season-ending injury the summer did not cover. */
 export function resetAvailability(state: GameState): void {
+  const prev = state.availability ?? {}
   state.availability = Object.fromEntries(
-    state.league.players.map((p) => [p.playerId, fitPlayer()]),
+    state.league.players.map((p) => {
+      const a = prev[p.playerId]
+      const leftover = leftoverAfterSummer(a?.out ?? 0, a?.injury?.severity ?? null)
+      if (!a?.injury || leftover <= 0) {
+        const next = fitPlayer()
+        if (a?.heldMinutes != null) next.heldMinutes = a.heldMinutes
+        return [p.playerId, next]
+      }
+      return [
+        p.playerId,
+        {
+          out: leftover,
+          injury: { ...a.injury, games: leftover },
+          condition: a.injury.returnCondition,
+          sinceReturn: 0,
+          missed: 0,
+          lastGame: null,
+          ...(a.heldMinutes != null ? { heldMinutes: a.heldMinutes } : {}),
+        },
+      ]
+    }),
   )
 }
 

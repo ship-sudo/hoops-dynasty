@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { PlayerSeasonStats } from '@hoops/core'
-import { minuteWeight, type RateInput, rateSeason, shrink } from './index.ts'
+import {
+  blendEvidence,
+  blendRelative,
+  minuteWeight,
+  type RateInput,
+  rateSeason,
+  ratingsFromRelative,
+  relativeSeason,
+  shrink,
+} from './index.ts'
 import { leaguePriorsFrom, rawProxies } from './proxies.ts'
 
 /** A plain league-average-ish season, then override what the test cares about. */
@@ -189,6 +198,23 @@ test('ratings are era-fair: the same edge over your league rates the same', () =
   const b = rateSeason(newLeague).get('sharp')!.ratings.three
   assert.ok(Math.abs(a - b) <= 4, `same edge should rate alike across eras: ${a} vs ${b}`)
   assert.ok(a > 60, `six points above league average should rate well, got ${a}`)
+})
+
+test('an injury year does not overwrite a proven shooter', () => {
+  const healthy = relativeSeason(league([player('star', { fg3Pct: 0.4, fg3a: 500, min: 2500 })]))
+  const hurt = relativeSeason(
+    league([player('star', { fg3Pct: 0.28, fg3a: 80, min: 400, gp: 12 })]),
+  )
+  const layers = [
+    { relative: hurt.get('star')!, minutes: 400, recency: 1 },
+    { relative: healthy.get('star')!, minutes: 2500, recency: 0.7 },
+  ]
+  const onlyHurt = ratingsFromRelative(hurt.get('star')!, minuteWeight(400))
+  const mixed = ratingsFromRelative(blendRelative(layers), blendEvidence(layers))
+  assert.ok(
+    mixed.three > onlyHurt.three + 8,
+    `blend should trust the healthy year: ${mixed.three} vs hurt-only ${onlyHurt.three}`,
+  )
 })
 
 test('league priors track the league they are given', () => {

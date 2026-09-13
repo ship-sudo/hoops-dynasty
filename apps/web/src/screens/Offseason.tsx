@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { OffseasonPhase, OffseasonState } from '../sim/api.ts'
+import type { OffseasonState } from '../sim/api.ts'
 import { useStore } from '../store.tsx'
 import { Panel, TeamChip } from '../ui/bits.tsx'
 import { shortDate } from '../ui/format.ts'
 import { Draft } from './Draft.tsx'
 import { FreeAgency } from './FreeAgency.tsx'
+import { OffseasonSquad } from './OffseasonSquad.tsx'
+import {
+  continueLabel,
+  continueTarget,
+  followPhase,
+  landingStep,
+  OFF_STEPS,
+  type OffStep,
+  stepTone,
+  stepUnlocked,
+} from './offseasonFlow.ts'
 
 /** What one offseason cost you and gave you, assembled on the way through. */
 export interface OffseasonSummary {
@@ -14,22 +25,33 @@ export interface OffseasonSummary {
   left: string[]
 }
 
-const PHASES: [OffseasonPhase, string][] = [
-  ['lottery', 'Lottery'],
-  ['draft', 'Draft'],
-  ['freeagency', 'Free agency'],
-  ['done', 'Season'],
-]
-
-function PhaseBar({ phase }: { phase: OffseasonPhase }) {
-  const at = PHASES.findIndex(([p]) => p === phase)
+function PhaseBar({
+  step,
+  phase,
+  onGo,
+}: {
+  step: OffStep
+  phase: OffseasonState['phase']
+  onGo: (id: OffStep) => void
+}) {
   return (
-    <div className="phasebar">
-      {PHASES.map(([p, label], i) => (
-        <span key={p} className={i < at ? 'step past' : i === at ? 'step now' : 'step'}>
-          {label}
-        </span>
-      ))}
+    <div className="phasebar" role="tablist" aria-label="Offseason steps">
+      {OFF_STEPS.map((s) => {
+        const tone = stepTone(s.id, step, phase)
+        return (
+          <button
+            key={s.id}
+            type="button"
+            role="tab"
+            aria-selected={tone === 'now'}
+            className={`step ${tone}`}
+            disabled={!stepUnlocked(s.id, phase)}
+            onClick={() => onGo(s.id)}
+          >
+            {s.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -42,6 +64,7 @@ export function Offseason() {
   const [working, setWorking] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [summary, setSummary] = useState<OffseasonSummary | null>(null)
+  const [step, setStep] = useState<OffStep | null>(null)
   /** Your picks, remembered as they are made — the draft board is cleared by the rollover. */
   const drafted = useRef(new Map<number, string>())
   /** Once the summary is written the new season has begun, so `offseason()` goes null again. */
@@ -63,6 +86,11 @@ export function Offseason() {
       live = false
     }
   }, [client, snapshot])
+
+  useEffect(() => {
+    if (!off) return
+    setStep((cur) => followPhase(cur ?? landingStep(off.phase), off.phase))
+  }, [off])
 
   // Remember every pick of yours that lands, so the summary survives the rollover.
   useEffect(() => {
@@ -109,6 +137,7 @@ export function Offseason() {
         left: [...beforeNames].filter((n) => !afterNames.has(n)),
       })
       setOff(next)
+      setStep('done')
       await refresh()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -118,6 +147,20 @@ export function Offseason() {
   }, [client, me, refresh])
 
   const news = useMemo(() => (off ? [...off.news].reverse() : []), [off])
+  const page = off ? (step ?? landingStep(off.phase)) : 'lottery'
+
+  const goStep = (id: OffStep) => {
+    if (!off || !stepUnlocked(id, off.phase)) return
+    setStep(id)
+  }
+
+  const onContinue = () => {
+    if (!off) return
+    const target = continueTarget(page, off.phase)
+    if (target === 'finish') void finish()
+    else if (target === 'home') setScreen('home')
+    else if (target) goStep(target)
+  }
 
   if (!snapshot || !me) return null
   if (!loaded)
@@ -142,6 +185,19 @@ export function Offseason() {
   }
 
   const label = off.phase === 'done' ? 'Preseason' : `${off.yearEnd} offseason`
+  const cta = continueLabel(page, off.phase)
+  const blurb =
+    page === 'lottery'
+      ? 'Lottery balls are in the drum.'
+      : page === 'draft'
+        ? 'Draft night.'
+        : page === 'squad'
+          ? 'Look at the room. Then re-sign, then the market.'
+          : page === 'resign'
+            ? 'Keep your own before you bid on anyone else.'
+            : page === 'market'
+              ? 'The rest of the league is open for business.'
+              : 'The new season is ready.'
 
   return (
     <div className="offseason">
@@ -149,37 +205,53 @@ export function Offseason() {
         <div>
           <div style={{ fontSize: 17, fontWeight: 600 }}>{label}</div>
           <div className="dim">
-            <TeamChip team={teamById.get(me)} long /> ·{' '}
-            {off.phase === 'lottery'
-              ? 'Lottery balls are in the drum.'
-              : off.phase === 'draft'
-                ? 'Draft night.'
-                : off.phase === 'freeagency'
-                  ? 'The market is open.'
-                  : 'The new season is ready.'}
+            <TeamChip team={teamById.get(me)} long /> · {blurb}
           </div>
         </div>
         <span style={{ flex: 1 }} />
-        <PhaseBar phase={off.phase} />
-        <button
-          type="button"
-          className="primary"
-          disabled={working || off.phase === 'done'}
-          onClick={finish}
-          title="Resolve the market and roll into the new season"
-        >
-          Start the season ▸
-        </button>
+        <PhaseBar step={page} phase={off.phase} onGo={goStep} />
+        {page === 'market' ? (
+          <button
+            type="button"
+            disabled={working}
+            onClick={() => act('advanceMarket')}
+            title="Let the league take a day. Bids that meet his price land; short ones can get beaten."
+          >
+            Sim day
+          </button>
+        ) : null}
+        {cta ? (
+          <button
+            type="button"
+            className="primary"
+            disabled={working}
+            onClick={onContinue}
+            title={
+              page === 'market' ? 'Resolve remaining bids and roll into the new season' : undefined
+            }
+          >
+            {cta}
+          </button>
+        ) : null}
       </div>
 
       {err ? <div className="banner">{err}</div> : null}
 
       <div className="cols sidebar">
         <div style={{ display: 'grid', gap: 12, alignContent: 'start', minWidth: 0 }}>
-          {off.phase === 'lottery' || off.phase === 'draft' ? (
+          {page === 'lottery' || page === 'draft' ? (
             <Draft off={off} act={act} working={working} me={me} />
-          ) : off.phase === 'freeagency' ? (
-            <FreeAgency off={off} act={act} working={working} me={me} />
+          ) : page === 'squad' ? (
+            <OffseasonSquad
+              off={off}
+              me={me}
+              onResign={() => goStep('resign')}
+              onRoster={() => setScreen('roster')}
+            />
+          ) : page === 'resign' ? (
+            <FreeAgency off={off} act={act} working={working} me={me} pool="own" />
+          ) : page === 'market' ? (
+            <FreeAgency off={off} act={act} working={working} me={me} pool="market" />
           ) : (
             <Panel title="The new season">
               {summary ? (
@@ -225,7 +297,6 @@ export function Offseason() {
                         </ul>
                         <p className="faint" style={{ fontSize: 11, marginTop: 6 }}>
                           Their contracts ran out and you were outbid, or nobody offered them one.
-                          Re-sign your own men next summer before the market opens.
                         </p>
                       </>
                     )}

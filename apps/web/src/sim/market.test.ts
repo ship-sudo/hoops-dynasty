@@ -20,6 +20,7 @@ import {
   type Potentials,
   recordTaxBills,
   runMarket,
+  runMarketDay,
   seasonTaxBills,
   whatHeWants,
 } from './market.ts'
@@ -232,6 +233,69 @@ test('offering a free agent more than he asks for signs him', { skip }, () => {
   )
   const signed = out.signings.find((s) => s.playerId === star.playerId)!
   assert.ok(signed.amount >= ask.amount, 'and he is paid at least what he asked')
+})
+
+test('a market day signs a bid that meets the ask and leaves a short one', { skip }, () => {
+  const { state, potentials } = opening()
+  const yearEnd = state.season.yearEnd
+  for (const p of state.league.players) if (p.teamId === SAS()) p.teamId = null
+  const pool0 = state.league.players.filter((p) => !p.contract)
+  const star = [...pool0].sort((a, b) => overall(b.ratings) - overall(a.ratings))[0]!
+  const bench = [...pool0].sort((a, b) => overall(a.ratings) - overall(b.ratings))[0]!
+  star.contract = null
+  star.teamId = null
+  bench.contract = null
+  bench.teamId = null
+  const starFa = freeAgentPool(state, yearEnd, potentials).find(
+    (p) => p.playerId === star.playerId,
+  )!
+  const benchFa = freeAgentPool(state, yearEnd, potentials).find(
+    (p) => p.playerId === bench.playerId,
+  )!
+  const ask = whatHeWants(state, starFa)
+  const benchAsk = whatHeWants(state, benchFa)
+  const day = runMarketDay(state, yearEnd, makeRng(11), potentials, [
+    { playerId: star.playerId, amount: ask.amount, years: ask.years },
+    { playerId: bench.playerId, amount: Math.max(1, Math.round(benchAsk.amount * 0.4)), years: 1 },
+  ])
+  assert.ok(day.userSigned.includes(star.playerId), 'meeting the ask lands him today')
+  assert.ok(
+    day.pending.some((o) => o.playerId === bench.playerId) ||
+      day.stolen.some((s) => s.playerId === bench.playerId),
+    'a short bid waits or gets beaten, it is not silently dropped',
+  )
+})
+
+test('a market day refuses a bid the cap will not let you pay', { skip }, () => {
+  const { state, potentials } = opening()
+  const yearEnd = state.season.yearEnd
+  const star = [...state.league.players]
+    .filter((p) => p.teamId !== SAS())
+    .sort((a, b) => overall(b.ratings) - overall(a.ratings))[0]!
+  star.contract = null
+  star.teamId = null
+  const mine = state.league.players
+    .filter((p) => p.teamId === SAS())
+    .sort(
+      (a, b) =>
+        (a.contract?.years.find((y) => y.yearEnd === yearEnd)?.amount ?? 0) -
+        (b.contract?.years.find((y) => y.yearEnd === yearEnd)?.amount ?? 0),
+    )
+  for (const p of mine.slice(0, 3)) {
+    p.teamId = null
+    p.contract = null
+  }
+
+  const day = runMarketDay(state, yearEnd, makeRng(11), potentials, [
+    { playerId: star.playerId, amount: 90_000_000, years: 4 },
+  ])
+  const miss = day.rejected.find((r) => r.playerId === star.playerId)
+  assert.ok(miss, 'meeting a price you cannot pay is a no, not a silent wait')
+  assert.equal(day.pending.length, 0, 'the bid does not sit on the table as if nothing happened')
+  assert.ok(
+    /maximum|cap room|over the cap/.test(miss.reason),
+    `the refusal should name the rule that bound: "${miss.reason}"`,
+  )
 })
 
 test('a refused bid names the rule that actually stopped it', { skip }, () => {

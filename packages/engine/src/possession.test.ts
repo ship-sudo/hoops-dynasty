@@ -198,10 +198,7 @@ describe('rotation', () => {
       closing: home.players.slice(0, 5).map((p) => p.playerId),
       blowout: home.players.slice(5, 10).map((p) => p.playerId),
     }
-    const r = simulateGame(
-      { era: ERA_2016, home, away, seasonType: 'regular' },
-      1,
-    )
+    const r = simulateGame({ era: ERA_2016, home, away, seasonType: 'regular' }, 1)
     const q2 = r.pbp.findIndex((e) => e.text === 'Start of Q2')
     assert.ok(q2 >= 0, 'the game has a second quarter')
     const bench = new Set(home.units.bench)
@@ -213,6 +210,23 @@ describe('rotation', () => {
       benchIn >= 3,
       `the second unit should take the start of Q2, got ${benchIn} bench entries in ${entered.map((e) => e.text).join('; ')}`,
     )
+  })
+
+  it('inheriting team tactics on a unit is the same game as leaving unitStyle off', () => {
+    const home = makeTeam('BIG', referenceRatings(0))
+    const away = makeTeam('SML', referenceRatings(0))
+    home.units = {
+      starters: home.players.slice(0, 5).map((p) => p.playerId),
+      bench: home.players.slice(5, 10).map((p) => p.playerId),
+      closing: home.players.slice(0, 5).map((p) => p.playerId),
+      blowout: home.players.slice(5, 10).map((p) => p.playerId),
+    }
+    const input = { era: ERA_2016, home, away, seasonType: 'regular' as const }
+    const a = simulateGame(input, 4)
+    home.unitStyle = { bench: { pace: 0, threes: 0 }, starters: { pace: 0, threes: 0 } }
+    const b = simulateGame(input, 4)
+    assert.equal(a.home.pts, b.home.pts)
+    assert.equal(a.away.pts, b.away.pts)
   })
 })
 

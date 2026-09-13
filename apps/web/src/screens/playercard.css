@@ -1,0 +1,156 @@
+/*
+ * The player dossier: health first, then the facts a GM actually asks.
+ * Prefixed `pc-`. Colours come from the shared tokens; nothing invents a hue.
+ */
+
+.pc {
+  display: grid;
+  gap: 14px;
+}
+
+.pc-head {
+  display: grid;
+  gap: 10px;
+}
+
+.pc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.pc-chips .badge {
+  margin-right: 0;
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
+.pc-chips .mr-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: capitalize;
+  letter-spacing: 0.06em;
+  color: var(--mr, var(--ink-dim));
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--mr, var(--line)) 45%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mr, var(--line)) 12%, transparent);
+}
+
+.pc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.pc-meta .strengths {
+  color: var(--ink);
+}
+
+.pc-alert {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+
+.pc-alert.out {
+  border-left-color: var(--loss);
+}
+
+.pc-alert.dtd,
+.pc-alert.through,
+.pc-alert.sat {
+  border-left-color: var(--warn);
+}
+
+.pc-alert .hd {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.pc-alert .dt {
+  font-size: 12px;
+  color: var(--ink-dim);
+  line-height: 1.4;
+}
+
+.pc-log {
+  width: 100%;
+}
+
+.pc-log th {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.pc-log .dnp {
+  font-weight: 700;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.pc-log .out {
+  font-weight: 700;
+  color: var(--loss);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.pc-log .opp {
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-log .pts {
+  font-weight: 700;
+}
+
+.pc-log .pts.hot {
+  color: var(--win);
+}
+
+.pc-form {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+  letter-spacing: 0.01em;
+}
+
+.pc-log-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.pc-log-tabs button.on {
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 700;
+  border-color: color-mix(in srgb, var(--team-pri, var(--accent)) 35%, var(--line));
+}
+
+.pc-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 820px) {
+  .pc-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

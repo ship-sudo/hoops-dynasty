@@ -313,11 +313,6 @@ function apply(state: GameState, signing: Signing, yearEnd: number): void {
   player.yearsWithTeam = stayed ? player.yearsWithTeam + 1 : 0
 }
 
-/**
- * Run the whole summer. `userOffers` are honoured first — a player who has an offer from the user
- * that beats what he is asking takes it, which is the one advantage of being the manager; anything
- * short of his asking price goes into the general market with everyone else's bids.
- */
 /** Why an offer of yours went nowhere. The user is owed an explanation, not a silent failure. */
 export interface RejectedOffer {
   playerId: string
@@ -330,6 +325,148 @@ function money(n: number): string {
   return `$${m >= 10 ? m.toFixed(1) : m.toFixed(2)}M`
 }
 
+/**
+ * Try to land the manager's bids. `patient` leaves a short offer on the table so he can raise it
+ * tomorrow; `strict` (the end of summer) rejects anything under the ask.
+ */
+function tryUserOffers(
+  state: GameState,
+  yearEnd: number,
+  potentials: Potentials,
+  userOffers: UserOffer[],
+  patient: boolean,
+): { signings: Signing[]; userSigned: string[]; rejected: RejectedOffer[]; pending: UserOffer[] } {
+  const rules = state.season.rules
+  const pool = freeAgentPool(state, yearEnd, potentials)
+  const userTeam = marketTeams(state, yearEnd).find((t) => t.teamId === state.userTeamId)
+  const salaries = userTeam ? [...userTeam.salaries] : []
+  let roster = userTeam?.rosterCount ?? 0
+  const signings: Signing[] = []
+  const userSigned: string[] = []
+  const rejected: RejectedOffer[] = []
+  const pending: UserOffer[] = []
+
+  for (const offer of userOffers) {
+    const fa = pool.find((p) => p.playerId === offer.playerId)
+    if (!fa || !userTeam) continue
+
+    const ask = askingFrom(state, fa, state.userTeamId)
+
+    if (roster >= rules.roster_max) {
+      rejected.push({
+        playerId: fa.playerId,
+        name: fa.name,
+        reason: `your roster is full at ${rules.roster_max}`,
+      })
+      continue
+    }
+
+    const rights =
+      fa.incumbentTeamId === state.userTeamId ? birdRights(fa.yearsWithIncumbent, rules) : 'none'
+    const individualMax = maxSalary(rules, fa.yearsOfService)
+    const teamCeiling =
+      rights === 'full' ? individualMax : maxOfferFor(salaries, rules, fa.yearsOfService)
+    const ceiling = Math.min(individualMax, teamCeiling)
+    const binding =
+      individualMax <= teamCeiling
+        ? `the individual maximum for his service is ${money(individualMax)}`
+        : capSpace(salaries, rules, roster) > 0
+          ? `you have ${money(teamCeiling)} of cap room`
+          : `you are over the cap; the exception you have left is ${money(teamCeiling)}`
+
+    const amount = Math.min(offer.amount, ceiling)
+
+    if (amount + 1 < ask.amount) {
+      // A short bid waits for you to raise it. A bid that met his price but the cap will not
+      // let you pay is a decision today — otherwise the wire stays quiet and it looks like
+      // nothing happened.
+      if (patient && offer.amount + 1 < ask.amount) {
+        pending.push(offer)
+        continue
+      }
+      rejected.push({
+        playerId: fa.playerId,
+        name: fa.name,
+        reason:
+          amount < offer.amount
+            ? `he wants ${money(ask.amount)}, your bid was cut to ${money(amount)} — ${binding}`
+            : `he wants ${money(ask.amount)} and you offered ${money(amount)}`,
+      })
+      continue
+    }
+
+    const signing: Signing = {
+      teamId: state.userTeamId,
+      playerId: fa.playerId,
+      amount,
+      years: Math.max(1, Math.min(5, offer.years)),
+      kind: amount <= rules.min_salary_0yr * 1.05 ? 'minimum' : 'standard',
+    }
+    apply(state, signing, yearEnd)
+    signings.push(signing)
+    userSigned.push(fa.playerId)
+    salaries.push({ playerId: fa.playerId, amount: signing.amount, kind: signing.kind })
+    roster++
+  }
+
+  return { signings, userSigned, rejected, pending }
+}
+
+/**
+ * One day of free agency: land any of your bids that meet his price, then one round of everyone
+ * else. Short offers stay on the table. The books do not close — call `runMarket` for that.
+ */
+export function runMarketDay(
+  state: GameState,
+  yearEnd: number,
+  rng: Rng,
+  potentials: Potentials,
+  userOffers: UserOffer[] = [],
+): {
+  signings: Signing[]
+  userSigned: string[]
+  rejected: RejectedOffer[]
+  pending: UserOffer[]
+  stolen: { playerId: string; name: string; teamId: string }[]
+} {
+  const rules = state.season.rules
+  const user = tryUserOffers(state, yearEnd, potentials, userOffers, true)
+  const rest = freeAgentPool(state, yearEnd, potentials).filter(
+    (p) => !user.userSigned.includes(p.playerId),
+  )
+  const wave = runFreeAgency(rest, marketTeams(state, yearEnd), rules, yearEnd, rng, {
+    rounds: 1,
+    fillTo: rules.roster_max - 1,
+    fill: false,
+  })
+  const stillOffered = new Set(user.pending.map((o) => o.playerId))
+  const stolen: { playerId: string; name: string; teamId: string }[] = []
+  const pending: UserOffer[] = []
+  for (const s of wave) {
+    apply(state, s, yearEnd)
+    if (stillOffered.has(s.playerId) && s.teamId !== state.userTeamId) {
+      const name = state.league.players.find((p) => p.playerId === s.playerId)?.name ?? s.playerId
+      stolen.push({ playerId: s.playerId, name, teamId: s.teamId })
+    }
+  }
+  for (const o of user.pending) {
+    if (stolen.some((x) => x.playerId === o.playerId)) continue
+    pending.push(o)
+  }
+  return {
+    signings: [...user.signings, ...wave],
+    userSigned: user.userSigned,
+    rejected: user.rejected,
+    pending,
+    stolen,
+  }
+}
+
+/**
+ * Run the whole summer. `userOffers` are honoured first — a player who has an offer from the user
+ * that beats what he is asking takes it, which is the one advantage of being the manager; anything
+ * short of his asking price goes into the general market with everyone else's bids.
+ */
 export function runMarket(
   state: GameState,
   yearEnd: number,
@@ -342,84 +479,14 @@ export function runMarket(
   signRookies(state, yearEnd)
   backfillPool(state, yearEnd, rng, potentials, bank)
 
-  const pool = freeAgentPool(state, yearEnd, potentials)
-  const userSigned: string[] = []
-  const signings: Signing[] = []
-  const rejected: RejectedOffer[] = []
+  const user = tryUserOffers(state, yearEnd, potentials, userOffers, false)
+  const rest = freeAgentPool(state, yearEnd, potentials).filter(
+    (p) => !user.userSigned.includes(p.playerId),
+  )
+  const signings = [...user.signings]
+  const userSigned = user.userSigned
+  const rejected = user.rejected
 
-  if (userOffers.length > 0) {
-    // The user's offers are bound by the same CBA as everyone else's. Cap room, or the right
-    // exception, or Bird rights on his own player — and never more than the individual maximum.
-    const userTeam = marketTeams(state, yearEnd).find((t) => t.teamId === state.userTeamId)
-    const salaries = userTeam ? [...userTeam.salaries] : []
-    let roster = userTeam?.rosterCount ?? 0
-
-    for (const offer of userOffers) {
-      const fa = pool.find((p) => p.playerId === offer.playerId)
-      if (!fa || !userTeam) continue
-      // His price to you, not his price to the league: a year on the bench costs you a premium.
-      const ask = askingFrom(state, fa, state.userTeamId)
-
-      if (roster >= rules.roster_max) {
-        rejected.push({
-          playerId: fa.playerId,
-          name: fa.name,
-          reason: `your roster is full at ${rules.roster_max}`,
-        })
-        continue
-      }
-
-      const rights =
-        fa.incumbentTeamId === state.userTeamId ? birdRights(fa.yearsWithIncumbent, rules) : 'none'
-      const individualMax = maxSalary(rules, fa.yearsOfService)
-      // Bird rights let you go over the cap for your own man; otherwise room or an exception.
-      const teamCeiling =
-        rights === 'full' ? individualMax : maxOfferFor(salaries, rules, fa.yearsOfService)
-      const ceiling = Math.min(individualMax, teamCeiling)
-      // Which rule actually binds, so the refusal names the right one. The old message blamed cap
-      // room for a limit that was usually the individual maximum.
-      const binding =
-        individualMax <= teamCeiling
-          ? `the individual maximum for his service is ${money(individualMax)}`
-          : capSpace(salaries, rules, roster) > 0
-            ? `you have ${money(teamCeiling)} of cap room`
-            : `you are over the cap; the exception you have left is ${money(teamCeiling)}`
-
-      // Bidding above the limit is not a mistake to be punished — it is an instruction to pay as
-      // much as the CBA allows. The offer is clamped, not dropped. Losing a player because you bid
-      // too much was the single most-reported absurdity in the market.
-      const amount = Math.min(offer.amount, ceiling)
-
-      // He signs with you when the money is there. Below his price he waits for the market.
-      if (amount + 1 < ask.amount) {
-        rejected.push({
-          playerId: fa.playerId,
-          name: fa.name,
-          reason:
-            amount < offer.amount
-              ? `he wants ${money(ask.amount)}, your bid was cut to ${money(amount)} — ${binding}`
-              : `he wants ${money(ask.amount)} and you offered ${money(amount)}`,
-        })
-        continue
-      }
-
-      const signing: Signing = {
-        teamId: state.userTeamId,
-        playerId: fa.playerId,
-        amount,
-        years: Math.max(1, Math.min(5, offer.years)),
-        kind: amount <= rules.min_salary_0yr * 1.05 ? 'minimum' : 'standard',
-      }
-      apply(state, signing, yearEnd)
-      signings.push(signing)
-      userSigned.push(fa.playerId)
-      // The next offer is judged against a payroll that now includes this one.
-      salaries.push({ playerId: fa.playerId, amount: signing.amount, kind: signing.kind })
-      roster++
-    }
-  }
-
-  const rest = pool.filter((p) => !userSigned.includes(p.playerId))
   const market = runFreeAgency(rest, marketTeams(state, yearEnd), rules, yearEnd, rng, {
     fillTo: rules.roster_max - 1,
   })

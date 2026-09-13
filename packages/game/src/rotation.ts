@@ -39,9 +39,9 @@ import {
   positionGap,
   RATING_KEYS,
   type RolePlayer,
-  roleOf,
   type RotationSituation,
   type RotationUnits,
+  roleOf,
   type SystemRoles,
   systemTactics,
   systemTendencies,
@@ -50,6 +50,7 @@ import {
   type YearEnd,
 } from '@hoops/core'
 import { roleRating } from '@hoops/progression'
+import { daysBetween } from './dates.ts'
 import {
   jitterFor,
   moraleFactor,
@@ -64,6 +65,13 @@ import type { LeaguePlayer, LeagueTeam, PlayerAvailability, TeamSettings } from 
 
 /** A basketball game is 240 man-minutes. Every rotation is renormalised to it. */
 const TEAM_MINUTES = 240
+
+/**
+ * In uniform tonight. The roster can be 15; only twelve suit up. The engine needs eight
+ * bodies when the treatment table is full.
+ */
+export const DRESS_MAX = 12
+export const DRESS_MIN = 8
 
 /** The regular-season ladder: eleven men, 36 down to 5, summing to 240 before any tilt. */
 const LADDER_REGULAR = [36, 34, 32, 30, 28, 22, 18, 15, 12, 8, 5]
@@ -375,6 +383,31 @@ export interface RotationOptions {
   staff?: StaffState
   /** Whether the zone is legal this season, for the defensive coach's scheme. */
   zoneLegal?: boolean
+  /** Tonight's date, so a back-to-back is a real calendar fact. Absent means nobody is sat for rest. */
+  date?: string
+}
+
+/**
+ * Why this man is held out tonight, or null if he dresses. Load management lives here, not in the
+ * playbook: sitting him is not a rating transform.
+ */
+export function restReason(
+  playerId: string,
+  settings: TeamSettings | undefined,
+  opts: RotationOptions,
+): 'bench' | 'hurt' | 'sat' | 'b2b' | 'tired' | null {
+  if (settings?.inactive?.includes(playerId)) return 'bench'
+  if ((opts.availability?.[playerId]?.out ?? 0) > 0) return 'hurt'
+  if (settings?.sitNext?.includes(playerId)) return 'sat'
+  const policy = settings?.rest?.[playerId]
+  if (!policy || !opts.date) return null
+  const last = opts.availability?.[playerId]?.lastGame
+  const days = last ? daysBetween(last, opts.date) : 99
+  const b2b = days <= 1
+  if (policy === 'b2b') return b2b ? 'b2b' : null
+  if (b2b) return 'b2b'
+  const cond = opts.availability?.[playerId]?.condition ?? 1
+  return cond < 0.78 ? 'tired' : null
 }
 
 /**
@@ -406,21 +439,24 @@ export function chooseSquad(
   const score = adjust
     ? (p: LeaguePlayer) => depthScore(p, opts.yearEnd) + adjust(p)
     : (p: LeaguePlayer) => depthScore(p, opts.yearEnd)
-  const inactive = new Set(settings?.inactive ?? [])
+  const held = (p: LeaguePlayer) => restReason(p.playerId, settings, opts) != null
   const out = (p: LeaguePlayer) => (opts.availability?.[p.playerId]?.out ?? 0) > 0
-  let available = roster.filter((p) => !inactive.has(p.playerId) && !out(p))
-  // The engine needs eight bodies. If the treatment table is full, the least hurt men suit up.
-  if (available.length < 8) {
+  let available = roster.filter((p) => !held(p))
+  // Eight bodies if we can get them without dressing a man who is Out. Rest nights and a
+  // healthy inactive come back first; a walking boot does not.
+  if (available.length < DRESS_MIN) {
     const bench = roster
-      .filter((p) => !available.includes(p))
+      .filter((p) => !available.includes(p) && !out(p))
       .sort((a, b) => {
-        const ao = opts.availability?.[a.playerId]?.out ?? 0
-        const bo = opts.availability?.[b.playerId]?.out ?? 0
-        return ao - bo || score(b) - score(a)
+        const ar = restReason(a.playerId, settings, opts)
+        const br = restReason(b.playerId, settings, opts)
+        const rank = (r: typeof ar) =>
+          r === 'b2b' || r === 'tired' || r === 'sat' ? 0 : r === 'bench' ? 1 : 2
+        return rank(ar) - rank(br) || score(b) - score(a)
       })
-    available = [...available, ...bench.slice(0, 8 - available.length)]
+    available = [...available, ...bench.slice(0, DRESS_MIN - available.length)]
   }
-  const pool = available.length >= 5 ? available : roster
+  const pool = available.length >= 5 ? available : available.length > 0 ? available : roster.filter((p) => !out(p))
   // A coach's depth order wins; anyone he did not rank falls in behind, by ability. A named
   // starting five outranks the depth order — you cannot name a man your centre and then leave him
   // eighth in the rotation — so the five slots go to the front, PG first. Named units (bench,
@@ -428,7 +464,7 @@ export function chooseSquad(
   const named = namedRotation(settings)
   const ranked = [...named, ...(settings?.depth ?? []).filter((id) => !named.includes(id))]
   const order = ranked.length ? new Map(ranked.map((id, i) => [id, i])) : null
-  return [...pool].sort((a, b) => {
+  const sorted = [...pool].sort((a, b) => {
     if (order) {
       const ai = order.get(a.playerId) ?? Number.MAX_SAFE_INTEGER
       const bi = order.get(b.playerId) ?? Number.MAX_SAFE_INTEGER
@@ -436,6 +472,7 @@ export function chooseSquad(
     }
     return score(b) - score(a) || (a.playerId < b.playerId ? -1 : 1)
   })
+  return sorted.slice(0, Math.min(DRESS_MAX, sorted.length))
 }
 
 export function buildTeamInput(
@@ -465,9 +502,10 @@ export function buildTeamInput(
       }
     : null
   const adjust = coachAdjust(profile, opts.yearEnd)
-  const sorted = chooseSquad(roster, opts, settings, adjust)
-  const depth = playoffs ? LADDER_PLAYOFFS.length : LADDER_REGULAR.length
-  const chosen = sorted.slice(0, Math.max(8, Math.min(depth, sorted.length)))
+  const sorted = chooseSquad(roster, opts, settings, adjust).filter(
+    (p) => (opts.availability?.[p.playerId]?.out ?? 0) <= 0,
+  )
+  const chosen = sorted.slice(0, Math.min(DRESS_MAX, sorted.length))
   const ladder = ladderTargets(
     chosen.map((p) => depthScore(p, opts.yearEnd) + (adjust?.(p) ?? 0)),
     playoffs,
@@ -561,5 +599,7 @@ export function buildTeamInput(
     tactics: system === 'balanced' ? base : systemTactics(system, base),
   }
   if (units) input.units = units
+  const style = settings?.unitTactics
+  if (style && (style.starters || style.bench || style.closing)) input.unitStyle = style
   return input
 }

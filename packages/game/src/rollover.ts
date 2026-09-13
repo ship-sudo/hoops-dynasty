@@ -13,6 +13,7 @@ import { recordRetirements, recordSeason, runHallOfFameBallot } from './history.
 import { settleMorale } from './morale.ts'
 import { capFrom } from './newgame.ts'
 import { generateSchedule } from './schedule.ts'
+import { restoreInjuryCover } from './sit.ts'
 import { staffOffseason } from './staff.ts'
 import { leagueOrder } from './standings.ts'
 import {
@@ -225,6 +226,7 @@ export function rolloverFinish(state: GameState, hooks: GameHooks, rng: Rng): vo
   )
   state.stats = {}
   resetAvailability(state)
+  for (const p of state.league.players) restoreInjuryCover(state, p)
   // A summer calms the dressing room without wiping it: last year's grievance comes back at 40%,
   // and every role is recomputed against the new roster and the new money.
   settleMorale(state)

@@ -21,6 +21,7 @@
 import type {
   LineupUnitId,
   NamedLineups,
+  NamedUnitStyles,
   OffenseSystemId,
   PlayerInstruction,
   Position,
@@ -51,11 +52,15 @@ import {
   systemFit,
   systemTendencies,
 } from '@hoops/core'
+import { DRESS_MAX } from '@hoops/game'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { RatingCard, RosterRow, TeamPlan } from '../sim/api.ts'
+import { display } from '../sim/card.ts'
 import { useStore } from '../store.tsx'
 import { Modal, Panel, RatingBar } from '../ui/bits.tsx'
 import { height, n1 } from '../ui/format.ts'
+import { InjuryMark } from '../ui/InjuryMark.tsx'
+import { cannotDress, injuryOptionTag, remainingTeamGames, trainerRows } from './tacticsHealth.ts'
 import './tactics.css'
 
 /** The automatic ladder, mirrored from packages/game/src/rotation.ts. It sums to exactly 240. */
@@ -63,8 +68,6 @@ const LADDER = [36, 34, 32, 30, 28, 22, 18, 15, 12, 8, 5]
 /** Regular-season auto: nine men. Playoffs shrink. r/nba consensus is 8–9 / 7–8. */
 const AUTO_RS = [34, 32, 30, 28, 26, 24, 22, 18, 16]
 const AUTO_PO = [38, 36, 34, 32, 28, 24, 20, 16]
-/** Discrete minutes a manager can assign. Current values not on the list stay selectable. */
-const MINUTE_STEPS = [0, 8, 12, 16, 18, 20, 22, 24, 28, 32, 36, 40]
 
 const TEAM_MINUTES = 240
 const HEAVY = 42
@@ -80,20 +83,43 @@ const DEFAULT_TACTICS: TacticsSettings = {
 }
 
 const UNIT_LABEL: Record<LineupUnitId, string> = {
-  starters: 'Starters',
-  bench: 'Bench',
-  closing: 'Closing',
+  starters: 'First unit',
+  bench: 'Second unit',
+  closing: 'Closers',
+}
+
+const UNIT_WHEN: Record<LineupUnitId, string> = {
+  starters: 'Opens Q1 and Q3, sits around the first TV timeout, then closes those quarters.',
+  bench: 'The five who play together off the bench. Opens Q2 and takes the middle of Q1/Q3.',
+  closing: 'Last six minutes of a tight fourth. Starting is prestige; closing is trust.',
 }
 
 // The card carries the rating a person should read — a flat mean of the raw nineteen says an
 // All-Star is a 55.
 const overallOf = (r: RosterRow) => r.card.overall
 
-/** Best remaining body for each slot. Naturals first, then the next-closest position. */
-function pickFive(
+/** Naturals and one slot over first; everybody else still in the list. */
+function optionsForSlot(
   pool: RosterRow[],
-  taken: Set<string>,
-): Partial<Record<Position, string>> {
+  slot: Position,
+): { suggested: RosterRow[]; rest: RosterRow[] } {
+  const suggested: RosterRow[] = []
+  const rest: RosterRow[] = []
+  for (const row of pool) {
+    if (Math.abs(positionGap(row.player.pos, slot)) <= 1) suggested.push(row)
+    else rest.push(row)
+  }
+  const byOvr = (a: RosterRow, b: RosterRow) => overallOf(b) - overallOf(a)
+  suggested.sort((a, b) => {
+    const g = Math.abs(positionGap(a.player.pos, slot)) - Math.abs(positionGap(b.player.pos, slot))
+    return g || byOvr(a, b)
+  })
+  rest.sort(byOvr)
+  return { suggested, rest }
+}
+
+/** Best remaining body for each slot. Naturals first, then the next-closest position. */
+function pickFive(pool: RosterRow[], taken: Set<string>): Partial<Record<Position, string>> {
   const next: Partial<Record<Position, string>> = {}
   for (const gap of [0, 1, 2, 3, 4]) {
     for (const pos of POSITIONS) {
@@ -234,7 +260,8 @@ function standouts(card: RatingCard): { label: string; value: number }[] {
 }
 
 function rateTone(v: number): string {
-  return v >= 70 ? 'win' : v <= 38 ? 'loss' : ''
+  const shown = display(v)
+  return shown >= 80 ? 'win' : shown <= 68 ? 'loss' : ''
 }
 
 const SHOOTING: { key: keyof Ratings; label: string }[] = [
@@ -256,7 +283,7 @@ function leverHints(
   t: Tendencies,
 ): { k: string; v: string; tone: string }[] {
   const n = (x: number): { v: string; tone: string } => ({
-    v: String(Math.round(x)),
+    v: String(display(x)),
     tone: rateTone(x),
   })
   switch (key) {
@@ -301,13 +328,6 @@ function rolePresets(p: RolePlayer, current: PlayerInstruction): InstructionPres
   return suggested
 }
 
-function minuteChoices(current: number, ceiling: number): number[] {
-  const cur = Math.max(0, Math.round(current))
-  const set = new Set<number>(MINUTE_STEPS.filter((m) => m <= ceiling || m === cur))
-  set.add(cur)
-  return [...set].sort((a, b) => a - b)
-}
-
 function MinutesSelect({
   name,
   value,
@@ -322,20 +342,58 @@ function MinutesSelect({
   onChange: (v: number) => void
 }) {
   const cur = Math.max(0, Math.round(value))
+  const [draft, setDraft] = useState<string | null>(null)
+  const bump = (d: number) => onChange(Math.max(0, Math.min(ceiling, cur + d)))
+  const commit = (raw: string) => {
+    const n = Number(raw)
+    onChange(Number.isFinite(n) ? Math.max(0, Math.min(ceiling, Math.round(n))) : 0)
+  }
   return (
-    <select
-      className="tc-minsel"
-      value={cur}
-      disabled={disabled}
-      aria-label={`Minutes for ${name}`}
-      onChange={(e) => onChange(Number(e.currentTarget.value))}
-    >
-      {minuteChoices(cur, ceiling).map((m) => (
-        <option key={m} value={m} disabled={m > ceiling && m !== cur}>
-          {m}
-        </option>
-      ))}
-    </select>
+    <span className="tc-minstep">
+      <button
+        type="button"
+        className="ghost tiny"
+        disabled={disabled || cur <= 0}
+        aria-label={`Fewer minutes for ${name}`}
+        onClick={() => bump(-1)}
+      >
+        −
+      </button>
+      <input
+        className="tc-minsel"
+        type="number"
+        min={0}
+        max={ceiling}
+        step={1}
+        value={draft ?? String(cur)}
+        disabled={disabled}
+        aria-label={`Minutes for ${name}`}
+        onFocus={() => setDraft(String(cur))}
+        onChange={(e) => {
+          const raw = e.currentTarget.value
+          setDraft(raw)
+          if (raw === '') return
+          const n = Number(raw)
+          if (Number.isFinite(n)) onChange(Math.max(0, Math.min(ceiling, Math.round(n))))
+        }}
+        onBlur={() => {
+          if (draft != null) commit(draft)
+          setDraft(null)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur()
+        }}
+      />
+      <button
+        type="button"
+        className="ghost tiny"
+        disabled={disabled || cur >= ceiling}
+        aria-label={`More minutes for ${name}`}
+        onClick={() => bump(1)}
+      >
+        +
+      </button>
+    </span>
   )
 }
 
@@ -434,6 +492,12 @@ function PlayerPop({
           <span className="dim">
             · {p.pos} · {p.age} · {height(p.heightIn)}, {p.weightLb} lb
           </span>
+          {row.injury ? (
+            <>
+              {' '}
+              <InjuryMark injury={row.injury} />
+            </>
+          ) : null}
         </span>
       }
       onClose={onClose}
@@ -465,7 +529,7 @@ function PlayerPop({
           <span className="lbl">Shooting</span>
           {SHOOTING.map(({ key, label }) => (
             <span key={key}>
-              {label} <b className={rateTone(p.ratings[key])}>{Math.round(p.ratings[key])}</b>
+              {label} <b className={rateTone(p.ratings[key])}>{display(p.ratings[key])}</b>
             </span>
           ))}
         </div>
@@ -547,8 +611,11 @@ export function Tactics() {
   const [order, setOrder] = useState<string[]>([])
   const [minutes, setMinutes] = useState<Record<string, number>>({})
   const [inactive, setInactive] = useState<string[]>([])
+  const [rest, setRest] = useState<Record<string, 'b2b' | 'manage'>>({})
   const [lineup, setLineup] = useState<Partial<Record<Position, string>>>({})
   const [lineups, setLineups] = useState<NamedLineups>({})
+  const [unitTactics, setUnitTactics] = useState<NamedUnitStyles>({})
+  const [unitTab, setUnitTab] = useState<LineupUnitId>('starters')
   const [system, setSystem] = useState<OffenseSystemId>('balanced')
   const [instructions, setInstructions] = useState<Record<string, PlayerInstruction>>({})
   const [tactics, setTactics] = useState<TacticsSettings>(DEFAULT_TACTICS)
@@ -572,18 +639,29 @@ export function Tactics() {
         ]
       : byAbility.map((r) => r.player.playerId)
     setOrder(ranked)
-    setInactive(got.plan.inactive.filter((id) => ranked.includes(id)))
+    const activeIds = ranked.filter((id) => !got.plan.inactive.includes(id))
+    const overflow = activeIds.slice(DRESS_MAX)
+    const parked = [
+      ...got.plan.inactive.filter((id) => ranked.includes(id)),
+      ...overflow,
+    ]
+    setInactive(parked)
+    setRest(got.plan.rest ?? {})
     const seeded: Record<string, number> = {}
-    const active = ranked.filter((id) => !got.plan.inactive.includes(id))
+    const dressing = ranked.filter((id) => !parked.includes(id))
     for (const id of ranked) {
-      const explicit = got.plan.minutes[id]
-      if (explicit != null) seeded[id] = explicit
+      if (parked.includes(id)) seeded[id] = 0
       else {
-        const slot = active.indexOf(id)
-        seeded[id] = slot < 0 ? 0 : (LADDER[slot] ?? 0)
+        const explicit = got.plan.minutes[id]
+        if (explicit != null) seeded[id] = explicit
+        else {
+          const slot = dressing.indexOf(id)
+          seeded[id] = slot < 0 ? 0 : (LADDER[slot] ?? 0)
+        }
       }
     }
     setMinutes(seeded)
+    if (overflow.length) await client.setPlan(me, { inactive: parked, minutes: seeded })
     setTactics(got.plan.tactics)
     setSystem(got.plan.system ?? 'balanced')
     setInstructions(got.plan.instructions ?? {})
@@ -606,6 +684,7 @@ export function Tactics() {
       if (POSITIONS.some((p) => cleaned[p])) units[unit] = cleaned
     }
     setLineups(units)
+    setUnitTactics(got.plan.unitTactics ?? {})
   }, [client, me])
 
   useEffect(() => {
@@ -634,8 +713,6 @@ export function Tactics() {
     return [...namedIds.filter((id) => !benched.has(id)), ...rest]
   }, [order, benched, namedIds])
   /** Everyone who is not starting. With no lineup named, the top five of the rotation start. */
-  const bench = useMemo(() => active.slice(5), [active])
-
   const total = active.reduce((s, id) => s + (minutes[id] ?? 0), 0)
   const left = TEAM_MINUTES - total
   const heavy = active.filter((id) => (minutes[id] ?? 0) > HEAVY)
@@ -673,8 +750,16 @@ export function Tactics() {
   const chosenFit = fits.get(system) ?? systemFit(system, rolePlayers)
 
   const slotOfId = useCallback(
-    (id: string): Position | null => POSITIONS.find((p) => lineup[p] === id) ?? null,
-    [lineup],
+    (id: string): Position | null => {
+      for (const unit of LINEUP_UNIT_IDS) {
+        const slots = lineups[unit]
+        if (!slots) continue
+        const pos = POSITIONS.find((p) => slots[p] === id)
+        if (pos) return pos
+      }
+      return POSITIONS.find((p) => lineup[p] === id) ?? null
+    },
+    [lineups, lineup],
   )
 
   /** What a man's tendencies and ratings actually become under the plan as it stands. */
@@ -702,8 +787,10 @@ export function Tactics() {
       if (next.depth) setOrder(next.depth)
       if (next.minutes) setMinutes(next.minutes)
       if (next.inactive) setInactive(next.inactive)
+      if (next.rest) setRest(next.rest)
       if (next.lineup) setLineup(next.lineup)
       if (next.lineups) setLineups(next.lineups)
+      if (next.unitTactics) setUnitTactics(next.unitTactics)
       if (next.instructions) setInstructions(next.instructions)
       void push(next).catch(() => undefined)
     },
@@ -802,15 +889,34 @@ export function Tactics() {
 
   const toggleBench = useCallback(
     (id: string) => {
-      const next = benched.has(id) ? inactive.filter((x) => x !== id) : [...inactive, id]
-      // A benched man cannot hold a starting slot.
+      const activating = benched.has(id)
+      let next = activating ? inactive.filter((x) => x !== id) : [...inactive, id]
+      const minutesNext = { ...minutes }
+      if (activating) delete minutesNext[id]
+      else minutesNext[id] = 0
+      if (activating && active.length >= DRESS_MAX) {
+        const victim = [...active].reverse().find((x) => x !== id)
+        if (victim) {
+          if (!next.includes(victim)) next = [...next, victim]
+          minutesNext[victim] = 0
+        }
+      }
       const l = { ...lineup }
-      if (!benched.has(id)) for (const p of POSITIONS) if (l[p] === id) delete l[p]
-      // Either way he comes back on zero: benching frees his minutes, and activating hands them
-      // back to the budget for you to spend rather than silently pushing the team over 240.
-      commit({ inactive: next, lineup: l, minutes: { ...minutes, [id]: 0 } })
+      for (const pid of next) {
+        for (const p of POSITIONS) if (l[p] === pid) delete l[p]
+      }
+      const units: NamedLineups = { ...lineups }
+      for (const unit of LINEUP_UNIT_IDS) {
+        const slots = { ...(units[unit] ?? {}) }
+        for (const pid of next) {
+          for (const p of POSITIONS) if (slots[p] === pid) delete slots[p]
+        }
+        if (POSITIONS.some((p) => slots[p])) units[unit] = slots
+        else delete units[unit]
+      }
+      commit({ inactive: next, lineup: l, lineups: units, minutes: minutesNext })
     },
-    [benched, inactive, lineup, minutes, commit],
+    [active, benched, inactive, lineup, lineups, minutes, commit],
   )
 
   /**
@@ -821,12 +927,32 @@ export function Tactics() {
   const fillByPosition = useCallback(() => {
     const pool = active
       .map((id) => byId.get(id))
-      .filter((r): r is RosterRow => !!r)
+      .filter((r): r is RosterRow => !!r && !cannotDress(r.injury))
       .sort((a, b) => overallOf(b) - overallOf(a))
     const taken = new Set<string>()
     const next = pickFive(pool, taken)
-    commit({ lineup: next, inactive: inactive.filter((x) => !taken.has(x)) })
-  }, [active, byId, inactive, commit])
+    commit({
+      lineup: next,
+      lineups: { ...lineups, starters: next },
+      inactive: inactive.filter((x) => !taken.has(x)),
+    })
+  }, [active, byId, inactive, lineups, commit])
+
+  /** Second unit from whoever the first unit did not take. */
+  const fillSecondUnit = useCallback(() => {
+    const pool = active
+      .map((id) => byId.get(id))
+      .filter((r): r is RosterRow => !!r && !cannotDress(r.injury))
+      .sort((a, b) => overallOf(b) - overallOf(a))
+    const taken = new Set<string>()
+    const first = lineups.starters ?? lineup
+    for (const pos of POSITIONS) {
+      const id = first[pos]
+      if (id) taken.add(id)
+    }
+    const next = pickFive(pool, taken)
+    commit({ lineups: { ...lineups, bench: next } })
+  }, [active, byId, lineup, lineups, commit])
 
   /**
    * One click for a real rotation: starters, bench, closing, and an 8–9 man minutes split.
@@ -838,7 +964,7 @@ export function Tactics() {
     const pool = order
       .filter((id) => !benched.has(id))
       .map((id) => byId.get(id))
-      .filter((r): r is RosterRow => !!r)
+      .filter((r): r is RosterRow => !!r && !cannotDress(r.injury))
       .sort((a, b) => overallOf(b) - overallOf(a))
     const taken = new Set<string>()
     const starters = pickFive(pool, taken)
@@ -904,30 +1030,11 @@ export function Tactics() {
     })
   }, [order, benched, byId, minutes, game, commit])
 
-  /** Fill a slot. If he is already in another slot the two men swap, which is what you meant. */
-  const setSlot = useCallback(
-    (pos: Position, id: string) => {
-      const next: Partial<Record<Position, string>> = { ...lineup }
-      if (!id) delete next[pos]
-      else {
-        const heldBy = POSITIONS.find((p) => p !== pos && next[p] === id)
-        const displaced = next[pos]
-        next[pos] = id
-        if (heldBy) {
-          if (displaced) next[heldBy] = displaced
-          else delete next[heldBy]
-        }
-      }
-      // Naming a man your starter un-benches him.
-      const stillOut = inactive.filter((x) => !Object.values(next).includes(x))
-      commit({ lineup: next, inactive: stillOut })
-    },
-    [lineup, inactive, commit],
-  )
-
   const setUnitSlot = useCallback(
     (unit: LineupUnitId, pos: Position, id: string) => {
-      const slots: Partial<Record<Position, string>> = { ...(lineups[unit] ?? {}) }
+      const slots: Partial<Record<Position, string>> = {
+        ...((unit === 'starters' ? (lineups.starters ?? lineup) : lineups[unit]) ?? {}),
+      }
       if (!id) delete slots[pos]
       else {
         const heldBy = POSITIONS.find((p) => p !== pos && slots[p] === id)
@@ -939,12 +1046,34 @@ export function Tactics() {
         }
       }
       const next: NamedLineups = { ...lineups, [unit]: slots }
-      const stillOut = inactive.filter((x) => !Object.values(slots).includes(x))
+      let stillOut = inactive.filter((x) => !Object.values(slots).includes(x))
+      const dressing = order.filter((x) => !stillOut.includes(x))
+      if (dressing.length > DRESS_MAX) {
+        const keep = new Set(Object.values(slots).filter((x): x is string => !!x))
+        const spill = dressing.filter((x) => !keep.has(x)).slice(DRESS_MAX - keep.size)
+        stillOut = [...stillOut, ...spill]
+      }
       if (unit === 'starters') commit({ lineups: next, lineup: slots, inactive: stillOut })
       else commit({ lineups: next, inactive: stillOut })
     },
-    [lineups, inactive, commit],
+    [lineups, lineup, inactive, order, commit],
   )
+
+  const setUnitStyle = useCallback(
+    (unit: LineupUnitId, style: NamedUnitStyles[LineupUnitId] | null) => {
+      const next: NamedUnitStyles = { ...unitTactics }
+      if (!style) delete next[unit]
+      else next[unit] = style
+      commit({ unitTactics: next })
+    },
+    [unitTactics, commit],
+  )
+
+  const copyFirstToClosers = useCallback(() => {
+    const first = lineups.starters ?? lineup
+    if (!POSITIONS.some((p) => first[p])) return
+    commit({ lineups: { ...lineups, closing: { ...first } } })
+  }, [lineups, lineup, commit])
 
   const setInstruction = useCallback(
     (id: string, lever: Lever, v: number) => {
@@ -985,8 +1114,11 @@ export function Tactics() {
       inactive: [],
       lineup: {},
       lineups: {},
+      unitTactics: {},
       system: 'balanced',
       instructions: {},
+      rest: {},
+      sitNext: [],
     })
     setClamped('')
     setOpenMan(null)
@@ -997,23 +1129,39 @@ export function Tactics() {
   /** Everybody who could fill a slot: the whole roster, so you can start whoever you like. */
   const selectable = useMemo(() => [...rows].sort((a, b) => overallOf(b) - overallOf(a)), [rows])
 
+  const firstFive = lineups.starters ?? lineup
+  const gamesLeft = remainingTeamGames(game?.calendar, me)
+  const trainer = useMemo(
+    () => trainerRows(rows, gamesLeft, (id) => game?.availability?.[id]?.injury?.severity ?? null),
+    [rows, gamesLeft, game],
+  )
+  const trainerById = useMemo(() => new Map(trainer.map((t) => [t.playerId, t])), [trainer])
+  const optionLabel = (row: RosterRow) =>
+    `${row.player.name} (${row.player.pos} ${row.card.overall})${injuryOptionTag(
+      row.injury,
+      game?.availability?.[row.player.playerId]?.injury?.severity,
+      gamesLeft,
+    )}`
   const misfits = useMemo(
     () =>
       POSITIONS.map((pos) => {
-        const id = lineup[pos]
+        const id = firstFive[pos]
         const r = id ? byId.get(id) : undefined
         if (!r) return null
         const gap = positionGap(r.player.pos, pos)
         return gap === 0 ? null : { pos, r, gap }
       }).filter((x): x is { pos: Position; r: RosterRow; gap: number } => !!x),
-    [lineup, byId],
+    [firstFive, byId],
   )
 
   const openRow = openMan ? (byId.get(openMan) ?? null) : null
 
   if (!snapshot) return null
   const team = teamById.get(me)
-  const emptySlots = POSITIONS.filter((p) => !lineup[p])
+  const emptySlots = POSITIONS.filter((p) => !firstFive[p])
+  const editingSlots = unitTab === 'starters' ? firstFive : (lineups[unitTab] ?? {})
+  const unitStyle = unitTactics[unitTab]
+  const inheritStyle = !unitStyle
 
   const budgetClass = left < 0 ? 'over' : left === 0 ? 'done' : ''
 
@@ -1045,7 +1193,7 @@ export function Tactics() {
           </span>
           <span style={{ flex: 1 }} />
           <span className="of">
-            {n1(total)} / {TEAM_MINUTES} · {withMinutes} men
+            {n1(total)} / {TEAM_MINUTES} · {withMinutes} of {DRESS_MAX} dress
           </span>
         </div>
 
@@ -1073,21 +1221,101 @@ export function Tactics() {
           </div>
         ) : null}
 
+        {trainer.length > 0 ? (
+          <div className="tc-trainer">
+            <div className="hd">
+              Unavailable
+              <span className="faint">
+                {rows.length -
+                  trainer.filter((t) => t.kind === 'out' || t.kind === 'season').length}{' '}
+                can dress
+                {trainer.some((t) => t.kind === 'season')
+                  ? ` · ${trainer.filter((t) => t.kind === 'season').length} out for the season`
+                  : ''}
+              </span>
+            </div>
+            <ul>
+              {trainer.map((t) => (
+                <li key={t.playerId}>
+                  <span
+                    className={
+                      t.kind === 'out' || t.kind === 'season' ? 'badge loss' : 'badge warn'
+                    }
+                  >
+                    {t.kind === 'season'
+                      ? 'SEASON'
+                      : t.kind === 'out'
+                        ? 'OUT'
+                        : t.kind === 'through'
+                          ? 'THRU'
+                          : 'DTD'}
+                  </span>
+                  <button type="button" className="tc-name" onClick={() => setOpenMan(t.playerId)}>
+                    {t.name}
+                  </button>
+                  <span className="pos">{t.pos}</span>
+                  <span className="why">{t.injuryName}</span>
+                  <span className="when">{t.when}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <Panel
-          title="Starting five"
+          title="Who plays together"
           actions={
-            <button type="button" className="ghost tiny" onClick={fillByPosition}>
-              Fill by position
-            </button>
+            <span style={{ display: 'flex', gap: 6 }}>
+              {unitTab === 'starters' ? (
+                <button type="button" className="ghost tiny" onClick={fillByPosition}>
+                  Fill by position
+                </button>
+              ) : null}
+              {unitTab === 'bench' ? (
+                <button type="button" className="ghost tiny" onClick={fillSecondUnit}>
+                  Fill remaining
+                </button>
+              ) : null}
+              {unitTab === 'closing' ? (
+                <button type="button" className="ghost tiny" onClick={copyFirstToClosers}>
+                  Copy first unit
+                </button>
+              ) : null}
+            </span>
           }
         >
+          <div className="tc-unit-tabs">
+            <fieldset className="segmented" aria-label="Rotation unit">
+              {LINEUP_UNIT_IDS.map((unit) => (
+                <button
+                  key={unit}
+                  type="button"
+                  className="ghost"
+                  aria-pressed={unitTab === unit}
+                  onClick={() => setUnitTab(unit)}
+                >
+                  {UNIT_LABEL[unit]}
+                </button>
+              ))}
+            </fieldset>
+          </div>
+          <p className="faint" style={{ fontSize: 11, margin: '8px 0' }}>
+            {UNIT_WHEN[unitTab]} Anyone can play any slot — suggested names are the naturals and the
+            next-closest. Empty slots go to the next man in the minutes table.
+          </p>
           <div className="tc-five">
             {POSITIONS.map((pos) => {
-              const id = lineup[pos]
+              const id = editingSlots[pos]
               const r = id ? byId.get(id) : undefined
+              const desk = r ? trainerById.get(r.player.playerId) : undefined
               const gap = r ? positionGap(r.player.pos, pos) : 0
               const bad = Math.abs(gap) >= 2
-              const mins = id ? (minutes[id] ?? 0) : 0
+              const { suggested, rest } = optionsForSlot(selectable, pos)
+              const option = (row: RosterRow) => (
+                <option key={row.player.playerId} value={row.player.playerId}>
+                  {optionLabel(row)}
+                </option>
+              )
               return (
                 <div
                   key={pos}
@@ -1096,16 +1324,16 @@ export function Tactics() {
                   <div className="pos">{pos}</div>
                   <select
                     value={id ?? ''}
-                    aria-label={`${pos} starter`}
-                    onChange={(e) => setSlot(pos, e.currentTarget.value)}
+                    aria-label={`${UNIT_LABEL[unitTab]} ${pos}`}
+                    onChange={(e) => setUnitSlot(unitTab, pos, e.currentTarget.value)}
                   >
                     <option value="">— nobody —</option>
-                    {selectable.map((row) => (
-                      <option key={row.player.playerId} value={row.player.playerId}>
-                        {row.player.name} ({row.player.pos} {row.card.overall} ·{' '}
-                        {height(row.player.heightIn)})
-                      </option>
-                    ))}
+                    {suggested.length > 0 ? (
+                      <optgroup label="Suggested">{suggested.map(option)}</optgroup>
+                    ) : null}
+                    {rest.length > 0 ? (
+                      <optgroup label="Everyone else">{rest.map(option)}</optgroup>
+                    ) : null}
                   </select>
                   {r ? (
                     <>
@@ -1122,82 +1350,94 @@ export function Tactics() {
                       </div>
                       <div className="good">{r.card.strengths.join(' · ')}</div>
                       <div className={`note${bad ? ' bad' : gap === 0 ? ' fine' : ''}`}>
-                        {gap === 0 ? `A natural ${pos}. No cost.` : positionNote(r.player.pos, pos)}
+                        {gap === 0 ? `A natural ${pos}.` : positionNote(r.player.pos, pos)}
                       </div>
-                      <span className="mins">
-                        min
-                        <MinutesSelect
-                          name={r.player.name}
-                          value={mins}
-                          ceiling={Math.min(48, mins + Math.max(0, left))}
-                          onChange={(v) => setMin(r.player.playerId, v)}
-                        />
-                      </span>
+                      {desk ? (
+                        <div
+                          className={`note${desk.kind === 'out' || desk.kind === 'season' ? ' bad' : ''}`}
+                        >
+                          {desk.injuryName} · {desk.when}
+                        </div>
+                      ) : null}
                     </>
                   ) : (
-                    // Unnamed slots are not a bug in this file. rotation.ts starts the named men
-                    // (PG→C, blanks skipped) and fills the rest from the depth chart — nobody is
-                    // assigned to the empty slot, so Fill by position is how you name all five.
-                    <div className="note fine">
-                      Nobody named. The best man left on the depth chart will start here.
-                    </div>
+                    <div className="note fine">Empty. Next man up from the rotation fills it.</div>
                   )}
                 </div>
               )
             })}
           </div>
-          {misfits.length > 0 ? (
+          {unitTab === 'starters' && misfits.length > 0 ? (
             <p className="faint" style={{ fontSize: 11, marginTop: 8, marginBottom: 0 }}>
-              {misfits.length === 1 ? 'One man is' : `${misfits.length} men are`} out of position.
-              That is not cosmetic: he loses the ratings the slot needs — a guard at centre stops
-              rebounding and stops protecting the rim, and you will see it in the box score.
+              {misfits.length === 1 ? 'One man is' : `${misfits.length} men are`} out of position in
+              the first unit. He loses the ratings the slot needs — you will see it in the box
+              score.
             </p>
-          ) : emptySlots.length === POSITIONS.length ? (
+          ) : unitTab === 'starters' && emptySlots.length === POSITIONS.length ? (
             <p className="faint" style={{ fontSize: 11, marginTop: 8, marginBottom: 0 }}>
-              No lineup named, so the top five of the rotation start and nobody is out of position —
-              exactly what the coach does when you leave him to it. “Fill by position” puts the best
-              man you have into each slot, and you can move anybody after that.
+              No first unit named, so the top of the rotation starts. “Fill by position” puts the
+              best natural at each slot.
             </p>
           ) : null}
-        </Panel>
-
-        <Panel title="Lineups">
-          <p className="faint" style={{ fontSize: 11, marginTop: 0, marginBottom: 8 }}>
-            Three five-man units. Starters open, the bench unit takes the middle of the quarter, the
-            closing five finishes a tight fourth. Leave them empty and minutes stay a share.
-          </p>
-          <div className="tc-units">
-            {LINEUP_UNIT_IDS.map((unit) => (
-              <div key={unit} className="tc-unit">
-                <div className="tc-unit-name">{UNIT_LABEL[unit]}</div>
-                <div className="tc-five">
-                  {POSITIONS.map((pos) => {
-                    const id = lineups[unit]?.[pos]
-                    return (
-                      <div key={pos} className={`tc-slot${id ? '' : ' empty'}`}>
-                        <div className="pos">{pos}</div>
-                        <select
-                          value={id ?? ''}
-                          aria-label={`${UNIT_LABEL[unit]} ${pos}`}
-                          onChange={(e) => setUnitSlot(unit, pos, e.currentTarget.value)}
-                        >
-                          <option value="">—</option>
-                          {selectable.map((row) => (
-                            <option key={row.player.playerId} value={row.player.playerId}>
-                              {row.player.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )
-                  })}
+          <div className="tc-unit-style">
+            <label className="checkline">
+              <input
+                type="checkbox"
+                checked={inheritStyle}
+                onChange={(e) => {
+                  if (e.currentTarget.checked) setUnitStyle(unitTab, null)
+                  else setUnitStyle(unitTab, { pace: tactics.pace, threes: tactics.threes })
+                }}
+              />
+              Same pace and shots as the team
+            </label>
+            {inheritStyle ? (
+              <p className="faint" style={{ fontSize: 11, margin: 0 }}>
+                This five runs the team instructions. Uncheck to push the tempo or let them fly only
+                while this group is on the floor.
+              </p>
+            ) : (
+              <div className="tc-unit-knobs">
+                <div>
+                  <div className="rowline" style={{ marginBottom: 4 }}>
+                    <strong>Pace</strong>
+                  </div>
+                  <Segmented
+                    name={`${UNIT_LABEL[unitTab]} pace`}
+                    values={[-1, 0, 1]}
+                    labels={['Walk it up', 'Team', 'Push it']}
+                    value={unitStyle?.pace ?? 0}
+                    onChange={(v) =>
+                      setUnitStyle(unitTab, {
+                        pace: v as -1 | 0 | 1,
+                        threes: unitStyle?.threes ?? 0,
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <div className="rowline" style={{ marginBottom: 4 }}>
+                    <strong>Shots</strong>
+                  </div>
+                  <Segmented
+                    name={`${UNIT_LABEL[unitTab]} shots`}
+                    values={[-1, 0, 1]}
+                    labels={['Work inside', 'Team', 'Let them fly']}
+                    value={unitStyle?.threes ?? 0}
+                    onChange={(v) =>
+                      setUnitStyle(unitTab, {
+                        pace: unitStyle?.pace ?? 0,
+                        threes: v as -1 | 0 | 1,
+                      })
+                    }
+                  />
                 </div>
               </div>
-            ))}
+            )}
           </div>
         </Panel>
 
-        <Panel flush title={`Rotation — ${bench.length} off the bench`}>
+        <Panel flush title={`Rotation · ${withMinutes} men`}>
           <table className="grid tc-rota">
             <thead>
               <tr>
@@ -1209,6 +1449,7 @@ export function Tactics() {
                 <th>Ovr</th>
                 <th>MPG now</th>
                 <th>Minutes</th>
+                <th className="text">Load</th>
                 <th className="text">Shot mix</th>
                 <th className="text">Instructions</th>
                 <th className="text">Order</th>
@@ -1228,6 +1469,7 @@ export function Tactics() {
                 const open = openMan === id
                 const orderIdx = order.indexOf(id)
                 const role = roleOf(id, roles)
+                const desk = trainerById.get(id)
                 return (
                   <tr
                     key={id}
@@ -1242,6 +1484,12 @@ export function Tactics() {
                       <button type="button" className="tc-name" onClick={() => setOpenMan(id)}>
                         {r.player.name}
                       </button>
+                      <InjuryMark injury={r.injury} />
+                      {desk ? (
+                        <div className="faint" style={{ fontSize: 10 }}>
+                          {desk.injuryName} · {desk.when}
+                        </div>
+                      ) : null}
                       {role !== 'other' ? (
                         <span className="faint" style={{ fontSize: 10, marginLeft: 5 }}>
                           {role === 'hub' ? 'HUB' : 'BALL'}
@@ -1272,6 +1520,30 @@ export function Tactics() {
                         disabled={out}
                         onChange={(v) => setMin(id, v)}
                       />
+                    </td>
+                    <td className="text">
+                      <select
+                        aria-label={`${r.player.name} load`}
+                        value={rest[id] ?? ''}
+                        disabled={out}
+                        onChange={(e) => {
+                          const v = e.currentTarget.value as '' | 'b2b' | 'manage'
+                          const next = { ...rest }
+                          if (v) next[id] = v
+                          else delete next[id]
+                          commit({ rest: next })
+                        }}
+                        title={r.injuryRisk?.text ?? 'How often he dresses'}
+                      >
+                        <option value="">Every night</option>
+                        <option value="b2b">Sit B2Bs</option>
+                        <option value="manage">Manage nights</option>
+                      </select>
+                      {r.injuryRisk ? (
+                        <div className="faint" style={{ fontSize: 10 }} title={r.injuryRisk.text}>
+                          {r.injuryRisk.short}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="text">
                       <ShotMix t={effective(r).tendencies} />
@@ -1324,7 +1596,16 @@ export function Tactics() {
                       </button>
                     </td>
                     <td className="text">
-                      <button type="button" className="ghost tiny" onClick={() => toggleBench(id)}>
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        onClick={() => toggleBench(id)}
+                        title={
+                          out && active.length >= DRESS_MAX
+                            ? 'Twelve already dress. This sits the last man in the rotation.'
+                            : undefined
+                        }
+                      >
                         {out ? 'Activate' : 'Bench'}
                       </button>
                     </td>
@@ -1333,7 +1614,7 @@ export function Tactics() {
               })}
               {order.length === 0 ? (
                 <tr>
-                  <td className="text dim" colSpan={12}>
+                  <td className="text dim" colSpan={13}>
                     No players.
                   </td>
                 </tr>
@@ -1363,11 +1644,10 @@ export function Tactics() {
         ) : null}
 
         <p className="faint" style={{ fontSize: 11 }}>
-          Drag a row, or use ▲ ▼, to reorder the rotation. The five named above start whatever the
-          order says; anyone you do not name falls in behind by ability. Minutes cannot be pushed
-          past 240 — “Balance to 240” scales the shape you set into the budget, and the coach still
-          fills in for foul trouble, blowouts and injuries.{' '}
-          {saved ? `Sent to the coach at ${saved}.` : ''}
+          Drag a row, or use ▲ ▼, to reorder the rotation. Twelve dress; sit the rest. Minutes are
+          a share of 240, so a thin night still fills the game. “Balance to 240” scales the shape
+          you set into the budget. The first unit starts; the second unit and the closers are the
+          fives who play together in those stints. {saved ? `Sent to the coach at ${saved}.` : ''}
         </p>
       </div>
 

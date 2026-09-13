@@ -89,6 +89,59 @@ test('benching a player keeps him out of the box score', { skip }, () => {
   for (let i = 0; i < 15; i++) d.simDay()
   const line = d.roster(SAS()).find((r) => r.player.playerId === star.playerId)!.totals
   assert.equal(line.min, 0, 'an inactive player does not play')
+  const log = d.gameLog(star.playerId, 20)
+  assert.ok(
+    log.some((g) => g.dnp),
+    'nights the team played without him still show, as DNP',
+  )
+  assert.ok(log.filter((g) => g.dnp).every((g) => g.line.min === 0))
+})
+
+test('computer lineup sits a man and puts him back with minutes', { skip }, () => {
+  const d = start(4)
+  assert.equal(d.getState().autoLineup, false)
+  d.setAutoLineup(true)
+  assert.equal(d.getState().autoLineup, true)
+  const star = d.roster(SAS())[0]!.player
+  d.resolveInjury(star.playerId, 'cover')
+  const sat = d.getPlan(SAS())
+  assert.ok(sat.inactive.includes(star.playerId))
+  assert.equal(sat.minutes[star.playerId], 0)
+  d.resolveInjury(star.playerId, 'restore')
+  const back = d.getPlan(SAS())
+  assert.ok(!back.inactive.includes(star.playerId))
+  assert.ok((back.minutes[star.playerId] ?? 0) > 0)
+  const dressed = Object.values(back.minutes).reduce((a, m) => a + m, 0)
+  assert.equal(dressed, 240)
+})
+
+test('sitTonight holds a man out one game, then clears', { skip }, () => {
+  const d = start(5)
+  const roster = d.roster(SAS())
+  assert.ok(
+    roster.every((r) => r.injuryRisk && r.injuryRisk.short.length > 0),
+    'every roster row carries an injury-risk number',
+  )
+  const preview = d.nextGame()
+  assert.ok(preview?.dressing && preview.dressing.length >= 8, 'tonight lists who dresses')
+  const star = preview.dressing.find((r) => !r.sitting)
+  assert.ok(star)
+
+  d.sitTonight(star.playerId, true)
+  const held = d.nextGame()
+  const row = held?.dressing?.find((r) => r.playerId === star.playerId)
+  assert.equal(row?.sitting, true)
+  assert.equal(row?.why, 'sat')
+
+  const gameId = preview.gameId
+  let guard = 0
+  while (!d.boxScore(gameId) && guard++ < 30) d.simDay()
+  const box = d.boxScore(gameId)
+  assert.ok(box, 'the night was played')
+  const mine = box.home.teamId === SAS() ? box.home : box.away
+  const line = mine.players.find((p) => p.playerId === star.playerId)
+  assert.ok(!line || line.min === 0, 'a one-game sit does not take the floor')
+  assert.deepEqual(d.getPlan(SAS()).sitNext, [], 'sitNext clears after the club plays')
 })
 
 test('a fleecing is refused and a fair deal goes through', { skip }, () => {
@@ -154,7 +207,31 @@ test('the offseason is the manager’s to run', { skip }, () => {
   const room = off!.finance!.cap - off!.finance!.payroll
   const target = off!.freeAgents.find((f) => f.asking < room * 0.6) ?? off!.freeAgents.at(-1)!
   const withOffer = d.makeOffer(target.playerId, target.asking, 3)
-  assert.equal(withOffer.freeAgents.find((f) => f.playerId === target.playerId)?.offer?.years, 3)
+  const stillListed = withOffer.freeAgents.find((f) => f.playerId === target.playerId)
+  assert.ok(
+    !stillListed || stillListed.offer?.years === 3,
+    'meeting the ask signs him that day, or the bid stays on the table',
+  )
+  assert.ok(
+    withOffer.news.some((n) => /Signed |No deal for /.test(n.headline)),
+    'meeting the ask writes the outcome on the wire',
+  )
+  const cheap =
+    withOffer.freeAgents.find((f) => f.playerId !== target.playerId && f.asking < room * 0.4) ??
+    withOffer.freeAgents.find((f) => f.playerId !== target.playerId)
+  if (cheap) {
+    d.makeOffer(cheap.playerId, Math.max(1, Math.round(cheap.asking * 0.4)), 1)
+    const afterDay = d.advanceMarket()
+    const listed = afterDay.freeAgents.find((f) => f.playerId === cheap.playerId)
+    assert.ok(
+      !listed || listed.offer,
+      'a short bid is still on the table after a day, or he left the board',
+    )
+    assert.ok(
+      afterDay.news.some((n) => n.headline.length > 0),
+      'Sim day writes the league onto the wire',
+    )
+  }
 
   d.finishOffseason()
   const state = d.getState()
@@ -334,10 +411,9 @@ test('a reload mid-market keeps the bids you have placed', { skip }, () => {
   const back = mod.loadGame(bundle!, JSON.parse(JSON.stringify(d.save())))
   const resumed = back.offseason()
   assert.equal(resumed?.phase, 'freeagency', 'you should come back into the market, not the draft')
-  assert.ok(
-    resumed?.freeAgents.find((f) => f.playerId === target.playerId)?.offer,
-    'your offer should still be on the table',
-  )
+  const stillUp = resumed?.freeAgents.find((f) => f.playerId === target.playerId)?.offer
+  const alreadyOurs = back.roster(SAS()).some((r) => r.player.playerId === target.playerId)
+  assert.ok(stillUp || alreadyOurs, 'the bid or the signing must survive a reload')
   back.finishOffseason()
   assert.ok(
     back.roster(SAS()).some((r) => r.player.playerId === target.playerId),
@@ -390,9 +466,28 @@ test('the league talks about itself every week', { skip }, () => {
   // An offer is a real one: the trade desk should be showing the same thing.
   const offer = talk.find((n) => n.kind === 'offer')
   if (offer) {
-    assert.ok(offer.body.includes('trade desk'), 'an offer should tell you where to answer it')
+    assert.ok(offer.body.includes('clock is stopped'), 'an offer should stop the week, not bury itself in the mail')
     assert.ok(d.incomingOffers(6).length > 0, 'and the desk should have offers in it')
   }
+})
+
+test('a trade offer stops Continue; accepting it does not play another night', { skip }, () => {
+  for (const seed of [12, 1, 7, 21, 33, 44]) {
+    const d = start(seed)
+    for (let i = 0; i < 90; i++) {
+      const r = d.simDay()
+      if (!r) break
+      if (r.interrupt?.kind !== 'offer') continue
+      const date = d.getState().date
+      const played = d.getState().gamesPlayed
+      const done = d.executeTrade(r.interrupt.user, r.interrupt.other)
+      assert.equal(done.accepted, true, done.reason)
+      assert.equal(d.getState().date, date, 'accepting an offer must not sim the league')
+      assert.equal(d.getState().gamesPlayed, played)
+      return
+    }
+  }
+  assert.fail('an incoming offer should pause the sim within a few seeds')
 })
 
 test('the inbox leads with your own club, not the league drizzle', { skip }, () => {

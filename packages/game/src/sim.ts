@@ -35,6 +35,11 @@ function phaseLog(state: GameState, text: string): void {
   pushLog(state, { date: state.calendar.date, yearEnd: state.season.yearEnd, kind: 'phase', text })
 }
 
+function teamName(state: GameState, teamId: string): string {
+  const t = state.league.teams.find((x) => x.teamId === teamId)
+  return t ? `${t.city} ${t.name}` : teamId
+}
+
 /** Advance one day in place. Returns the games played that day. */
 function step(
   state: GameState,
@@ -138,6 +143,29 @@ function step(
       const more = playoffDay(state, hooks, rng)
       state.calendar.date = addDays(state.calendar.date, 2)
       if (!more) {
+        const po = state.playoffs
+        const champ = po?.championTeamId
+        const runner = po?.runnerUpTeamId
+        const final = po?.rounds[po.rounds.length - 1]?.[0]
+        if (champ && runner && final) {
+          const champIsHigh = final.winnerTeamId === final.highTeamId
+          const championWins = champIsHigh ? final.highWins : final.lowWins
+          const runnerUpWins = champIsHigh ? final.lowWins : final.highWins
+          const me = state.userTeamId
+          const yours = me === champ ? 'won' : me === runner ? 'finals' : 'out'
+          setSimInterrupt(state, {
+            kind: 'champion',
+            yearEnd: state.season.yearEnd,
+            championTeamId: champ,
+            championName: teamName(state, champ),
+            runnerUpTeamId: runner,
+            runnerUpName: teamName(state, runner),
+            championWins,
+            runnerUpWins,
+            yours,
+            finalsMvpName: state.awards?.finalsMvp?.name ?? null,
+          })
+        }
         state.phase = 'lottery'
         state.calendar.date = `${state.season.yearEnd}-05-15`
       }

@@ -100,6 +100,29 @@ export function PlayerActions({
         <button type="button" className="ghost" onClick={() => setScreen('trade')}>
           Trade desk ▸
         </button>
+        {desk.waive ? (
+          <button
+            type="button"
+            className="ghost"
+            disabled={working || !desk.waive.ok}
+            title={
+              desk.waive.ok ? 'Guaranteed money stays on the cap this year.' : desk.waive.reason
+            }
+            onClick={() =>
+              void act(async () => {
+                const res = await client.manager<{ ok: boolean; message: string }>(
+                  'waivePlayer',
+                  playerId,
+                )
+                setNote(res.message)
+                if (!res.ok) return
+                onChanged?.()
+              })
+            }
+          >
+            Waive
+          </button>
+        ) : null}
       </div>
       {desk.listed ? (
         desk.offers.length === 0 ? (

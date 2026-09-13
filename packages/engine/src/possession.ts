@@ -225,6 +225,10 @@ interface Side {
   offOreb: number
   offPassing: number
   label: 'home' | 'away'
+  /** Offset from team tactics.threes for the five currently on the floor. 0 when inheriting. */
+  unitThreesExtra: number
+  /** Offset from team tactics.pace for the five currently on the floor. 0 when inheriting. */
+  unitPaceExtra: number
 }
 
 const SCRATCH = new Float64Array(8)
@@ -272,6 +276,8 @@ function makeSide(team: TeamGameInput, label: 'home' | 'away', anch: Anchors): S
     offOreb: 0,
     offPassing: 0,
     label,
+    unitThreesExtra: 0,
+    unitPaceExtra: 0,
   }
   const threes = team.tactics.threes
   // Tendencies are shares of *recorded FGA*, but a shot event only becomes an FGA when it
@@ -499,6 +505,10 @@ export function simulateGameWith(
     const margin = s.label === 'home' ? home.pts - away.pts : away.pts - home.pts
     const unit = unitForSituation({ period, clock, margin, starterCondition })
     const wanted = units[unit] ?? units.starters
+    const style = unit === 'blowout' ? undefined : s.team.unitStyle?.[unit]
+    const team = s.team.tactics
+    s.unitPaceExtra = (style?.pace ?? team.pace) - team.pace
+    s.unitThreesExtra = (style?.threes ?? team.threes) - team.threes
     const floor: number[] = []
     const used = new Set<number>()
     for (const id of wanted) {
@@ -519,9 +529,7 @@ export function simulateGameWith(
         used.add(i)
       }
     }
-    const same =
-      floor.length === 5 &&
-      floor.every((i, j) => s.onFloor[j] === i)
+    const same = floor.length === 5 && floor.every((i, j) => s.onFloor[j] === i)
     if (same) return
     for (let j = 0; j < 5; j++) s.isOn[s.onFloor[j]!] = 0
     for (let j = 0; j < 5; j++) {
@@ -734,6 +742,7 @@ export function simulateGameWith(
   function possession(o: Side, d: Side, limit: number): number {
     o.possessions++
     let dur = baseSeconds * (0.35 + 1.3 * rng.next())
+    if (o.unitPaceExtra) dur *= 1 - 0.03 * o.unitPaceExtra
     const zHome = o.label === 'home' ? homeZ : -homeZ
     // Score effect: a lead is a headwind, a deficit a tailwind.
     const zRevert = -REVERT * Math.max(-REVERT_CAP, Math.min(REVERT_CAP, o.pts - d.pts))
@@ -800,14 +809,17 @@ export function simulateGameWith(
         SCRATCH[1] = o.zoneW[base + 1]! * 0.97
         SCRATCH[2] = o.zoneW[base + 2]! * 1.05
         SCRATCH[3] = o.zoneW[base + 3]! * 1.06
-        z = pickWeighted(rng, SCRATCH, 4)
       } else {
         SCRATCH[0] = o.zoneW[base]!
         SCRATCH[1] = o.zoneW[base + 1]!
         SCRATCH[2] = o.zoneW[base + 2]!
         SCRATCH[3] = o.zoneW[base + 3]!
-        z = pickWeighted(rng, SCRATCH, 4)
       }
+      if (o.unitThreesExtra) {
+        const teamT = o.team.tactics.threes
+        SCRATCH[3] *= (1 + 0.18 * (teamT + o.unitThreesExtra)) / (1 + 0.18 * teamT)
+      }
+      z = pickWeighted(rng, SCRATCH, 4)
       const three = z === THREE
       const value = three ? 3 : 2
       const zoneRating = z === RIM ? r.rim : z === CLOSE ? r.close : z === MID ? r.mid : r.three

@@ -31,6 +31,7 @@ export const FLAG = {
   allNba1: 32,
   allNba2: 64,
   allNba3: 128,
+  fmvp: 256,
 } as const
 
 export type FlagName = keyof typeof FLAG
@@ -301,6 +302,7 @@ function flagsFor(playerId: string, teamId: string, state: GameState): number {
     if (a.mvp?.playerId === playerId) flags |= FLAG.mvp
     if (a.roy?.playerId === playerId) flags |= FLAG.roy
     if (a.dpoy?.playerId === playerId) flags |= FLAG.dpoy
+    if (a.finalsMvp?.playerId === playerId) flags |= FLAG.fmvp
     const tiers = [FLAG.allNba1, FLAG.allNba2, FLAG.allNba3]
     a.allNba.forEach((team, i) => {
       if (team.some((w) => w.playerId === playerId)) flags |= tiers[i] ?? FLAG.allNba3

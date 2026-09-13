@@ -821,6 +821,10 @@ export type LineupSlots = Partial<Record<Position, string>>
 /** Named lineups on a team. Optional on a save: missing means the old minutes share. */
 export type NamedLineups = Partial<Record<LineupUnitId, LineupSlots>>
 
+/** Pace and shot mix for one named five. Missing on a unit means it plays like the team. */
+export type UnitStyle = Pick<Tactics, 'pace' | 'threes'>
+export type NamedUnitStyles = Partial<Record<LineupUnitId, UnitStyle>>
+
 /** What the engine actually puts on the floor, including garbage time. */
 export type RotationUnitId = LineupUnitId | 'blowout'
 
@@ -905,6 +909,25 @@ export function normaliseLineups(raw: NamedLineups | undefined | null): NamedLin
       if (pid) cleaned[pos] = pid
     }
     if (POSITIONS.some((p) => cleaned[p])) out[id] = cleaned
+  }
+  return LINEUP_UNIT_IDS.some((id) => out[id]) ? out : undefined
+}
+
+function asStep(n: number | undefined): -1 | 0 | 1 {
+  if (n == null || n === 0) return 0
+  return n > 0 ? 1 : -1
+}
+
+/** Drop empty units so a cleared plan stores as nothing. */
+export function normaliseUnitTactics(
+  raw: NamedUnitStyles | undefined | null,
+): NamedUnitStyles | undefined {
+  if (raw == null) return undefined
+  const out: NamedUnitStyles = {}
+  for (const id of LINEUP_UNIT_IDS) {
+    const s = raw[id]
+    if (!s) continue
+    out[id] = { pace: asStep(s.pace), threes: asStep(s.threes) }
   }
   return LINEUP_UNIT_IDS.some((id) => out[id]) ? out : undefined
 }

@@ -115,18 +115,31 @@ function PlayerTable({ box }: { box: TeamBox }) {
   )
 }
 
-function QuarterLine({ result }: { result: GameResult }) {
+function QuarterLine({
+  result,
+  nameOf,
+  colorOf,
+  first = 'away',
+}: {
+  result: GameResult
+  nameOf?: (teamId: string) => string
+  colorOf?: (teamId: string) => string
+  first?: 'away' | 'home'
+}) {
   const { teamById } = useStore()
   const periods = Math.max(result.home.quarters.length, result.away.quarters.length)
   const label = (i: number) => (i < 4 ? `Q${i + 1}` : `OT${i - 3}`)
+  const sides = first === 'home' ? [result.home, result.away] : [result.away, result.home]
   const row = (box: TeamBox) => {
     const t = teamById.get(box.teamId)
+    const name = nameOf?.(box.teamId) ?? t?.abbr ?? box.teamId
+    const hue = colorOf?.(box.teamId) ?? teamColors(t?.abbr ?? '')[0]
     return (
       <tr key={box.teamId}>
         <td className="text">
           <span className="chip">
-            <span className="swatch" style={{ background: teamColors(t?.abbr ?? '')[0] }} />
-            {t?.abbr ?? box.teamId}
+            <span className="swatch" style={{ background: hue }} />
+            {name}
           </span>
         </td>
         {Array.from({ length: periods }, (_, i) => (
@@ -151,11 +164,55 @@ function QuarterLine({ result }: { result: GameResult }) {
           <th>Final</th>
         </tr>
       </thead>
-      <tbody>
-        {row(result.away)}
-        {row(result.home)}
-      </tbody>
+      <tbody>{sides.map(row)}</tbody>
     </table>
+  )
+}
+
+/** Quarter line + two player tables. Used by the regular-season modal and the All-Star recap. */
+export function GameBox({
+  result,
+  nameOf,
+  colorOf,
+  first = 'away',
+}: {
+  result: GameResult
+  nameOf?: (teamId: string) => string
+  colorOf?: (teamId: string) => string
+  first?: 'away' | 'home'
+}) {
+  const { teamById } = useStore()
+  const sides = first === 'home' ? [result.home, result.away] : [result.away, result.home]
+  return (
+    <>
+      <QuarterLine
+        result={result}
+        {...(nameOf ? { nameOf } : {})}
+        {...(colorOf ? { colorOf } : {})}
+        first={first}
+      />
+      {sides.map((box) => {
+        const t = teamById.get(box.teamId)
+        const title = nameOf?.(box.teamId) ?? (t ? `${t.city} ${t.name}` : box.teamId)
+        const hue = colorOf?.(box.teamId) ?? teamColors(t?.abbr ?? '')[0]
+        const role = nameOf ? null : box === result.away ? 'away' : 'home'
+        return (
+          <div key={box.teamId}>
+            <div className="boxsection" style={{ ['--c' as string]: hue }}>
+              <h3>{title}</h3>
+              {role ? <span className="faint">{role}</span> : null}
+            </div>
+            <div className="table-x">
+              <PlayerTable box={box} />
+            </div>
+          </div>
+        )
+      })}
+      <p className="faint" style={{ fontSize: 11, margin: 0 }}>
+        A dot after a name means he started. “Poss” is possessions — how many times each side had
+        the ball. Hover a column heading for what it counts.
+      </p>
+    </>
   )
 }
 
@@ -210,30 +267,7 @@ function BoxScoreModal({ gameId, onClose }: { gameId: string; onClose: () => voi
       <div className="body" style={{ padding: 12, display: 'grid', gap: 14 }}>
         {err ? <div className="banner">{err}</div> : null}
         {!result && !err ? <p className="dim">Loading…</p> : null}
-        {result ? (
-          <>
-            <QuarterLine result={result} />
-            {[result.away, result.home].map((box) => {
-              const t = teamById.get(box.teamId)
-              return (
-                <div key={box.teamId}>
-                  <div
-                    className="boxsection"
-                    style={{ ['--c' as string]: teamColors(t?.abbr ?? '')[0] }}
-                  >
-                    <h3>{t ? `${t.city} ${t.name}` : box.teamId}</h3>
-                    <span className="faint">{box === result.away ? 'away' : 'home'}</span>
-                  </div>
-                  <PlayerTable box={box} />
-                </div>
-              )
-            })}
-            <p className="faint" style={{ fontSize: 11, margin: 0 }}>
-              A dot after a name means he started. “Poss” is possessions — how many times each side
-              had the ball. Hover a column heading for what it counts.
-            </p>
-          </>
-        ) : null}
+        {result ? <GameBox result={result} /> : null}
       </div>
     </Modal>
   )

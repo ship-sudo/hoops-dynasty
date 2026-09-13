@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { emptyStatLine } from '@hoops/core'
-import { computeAwards } from './awards.ts'
+import { candidates, computeAwards, computeFinalsHonors } from './awards.ts'
 import { fakeEngine, fixtureBundle } from './fixture.ts'
 import { newGame } from './newgame.ts'
 import { simRestOfSeason } from './sim.ts'
-import type { GameHooks, GameState } from './state.ts'
+import type { GameHooks, GameState, SeasonStatLine } from './state.ts'
 
 const hooks: GameHooks = { engine: fakeEngine }
 
@@ -93,4 +93,133 @@ test('no eligible players means no awards, not a crash', () => {
   assert.equal(a.roy, null)
   assert.equal(a.dpoy, null)
   assert.deepEqual(a.allNba, [])
+})
+
+function put(
+  s: GameState,
+  playerId: string,
+  teamId: string,
+  gp: number,
+  box: Partial<SeasonStatLine>,
+): void {
+  s.stats[playerId] = { ...emptyStatLine(), gp, gs: gp, teamId, ...box }
+}
+
+test('two stars on the same 60-win club do not go 1–2 in MVP', () => {
+  const s = newGame(fixtureBundle(), 'T00', 1)
+  for (const r of Object.values(s.records)) {
+    r.wins = 30
+    r.losses = 52
+  }
+  s.records.T00!.wins = 62
+  s.records.T00!.losses = 20
+  s.records.T05!.wins = 54
+  s.records.T05!.losses = 28
+  // Duncan-shaped and Parker-shaped, same locker room. Without the ballot cut they finish 1–2.
+  put(s, 'T00-0', 'T00', 82, {
+    pts: 2200,
+    oreb: 250,
+    dreb: 550,
+    ast: 400,
+    stl: 80,
+    blk: 180,
+    fgm: 850,
+    fga: 1700,
+    tov: 250,
+  })
+  put(s, 'T00-1', 'T00', 82, {
+    pts: 2000,
+    oreb: 80,
+    dreb: 320,
+    ast: 700,
+    stl: 90,
+    blk: 20,
+    fgm: 740,
+    fga: 1600,
+    tov: 220,
+  })
+  put(s, 'T05-0', 'T05', 82, {
+    pts: 1800,
+    oreb: 150,
+    dreb: 450,
+    ast: 500,
+    stl: 90,
+    blk: 80,
+    fgm: 680,
+    fga: 1500,
+    tov: 200,
+  })
+
+  const race = [...candidates(s)].sort((a, b) => b.mvpVote - a.mvpVote)
+  assert.ok(race.length >= 2)
+  assert.equal(race[0]?.playerId, 'T00-0', 'the alpha on the 62-win side is MVP')
+  assert.notEqual(race[0]?.teamId, race[1]?.teamId, 'his teammate is not second')
+  assert.equal(race[1]?.playerId, 'T05-0')
+
+  const a = computeAwards(s)
+  assert.equal(a.mvp?.playerId, 'T00-0')
+  const allIds = a.allNba.flat().map((w) => w.playerId)
+  assert.ok(allIds.includes('T00-0'))
+  assert.ok(allIds.includes('T00-1'), 'the co-star still makes All-NBA')
+})
+
+test('a simulated season does not hand MVP 1 and 2 to the same club', () => {
+  const s = season(21)
+  const race = [...candidates(s)].sort((a, b) => b.mvpVote - a.mvpVote)
+  assert.ok(race.length >= 2)
+  assert.notEqual(race[0]?.teamId, race[1]?.teamId)
+})
+
+test('Finals MVP is a champion, not the runner-up who scored more', () => {
+  const game = (
+    id: string,
+    lines: { playerId: string; teamId: string; pts: number; reb: number; ast: number }[],
+  ) => ({
+    gameId: id,
+    date: '2004-06-15',
+    homeTeamId: 'SAS',
+    awayTeamId: 'DET',
+    homePts: 80,
+    awayPts: 70,
+    overtimes: 0,
+    seasonType: 'playoffs' as const,
+    players: lines.map((p) => ({ ...p, min: 40 })),
+  })
+  const g1 = game('f1', [
+    { playerId: 'duncan', teamId: 'SAS', pts: 24, reb: 12, ast: 4 },
+    { playerId: 'parker', teamId: 'SAS', pts: 10, reb: 2, ast: 9 },
+    { playerId: 'billups', teamId: 'DET', pts: 40, reb: 4, ast: 8 },
+  ])
+  const g2 = game('f2', [
+    { playerId: 'duncan', teamId: 'SAS', pts: 22, reb: 11, ast: 3 },
+    { playerId: 'parker', teamId: 'SAS', pts: 12, reb: 1, ast: 10 },
+    { playerId: 'billups', teamId: 'DET', pts: 38, reb: 3, ast: 9 },
+  ])
+  const honors = computeFinalsHonors([g1, g2], 'SAS', (id) => id)
+  assert.equal(honors.finalsMvp?.playerId, 'duncan')
+  assert.equal(honors.finalsMvp?.teamId, 'SAS')
+  assert.equal(honors.finalsLeaders.pts?.playerId, 'duncan')
+  assert.equal(honors.finalsLeaders.reb?.playerId, 'duncan')
+  assert.equal(honors.finalsLeaders.ast?.playerId, 'parker')
+})
+
+test('Finals honours stay empty when the series has no player lines', () => {
+  const honors = computeFinalsHonors(
+    [
+      {
+        gameId: 'f1',
+        date: '2004-06-15',
+        homeTeamId: 'SAS',
+        awayTeamId: 'DET',
+        homePts: 80,
+        awayPts: 70,
+        overtimes: 0,
+        seasonType: 'playoffs',
+      },
+    ],
+    'SAS',
+    (id) => id,
+  )
+  assert.equal(honors.finalsMvp, null)
+  assert.equal(honors.finalsLeaders.pts, null)
 })

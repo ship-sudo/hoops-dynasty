@@ -428,6 +428,22 @@ test('a whole league clears the market at real money, not at the minimum', () =>
   assert.ok((paid.get('p0') ?? 0) > (paid.get('p100') ?? 0) * 4)
 })
 
+test('a single wave without fill does not dress every roster', () => {
+  const r = rules()
+  const teams = Array.from({ length: 30 }, (_, i) => faTeam(`T${i}`, 22_000_000, 0.5, 41))
+  const pool = Array.from({ length: 120 }, (_, i) =>
+    freeAgent(`p${i}`, Math.round(72 - i * 0.24), 24 + (i % 10)),
+  )
+  const wave = runFreeAgency(pool, teams, r, 2016, makeRng(7), {
+    rounds: 1,
+    fillTo: r.roster_max - 1,
+    fill: false,
+  })
+  const full = runFreeAgency(pool, teams, r, 2016, makeRng(7), { fillTo: r.roster_max - 1 })
+  assert.ok(wave.length > 0, 'a day of the market still signs people')
+  assert.ok(wave.length < full.length, `a day should not finish the summer: ${wave.length} vs ${full.length}`)
+})
+
 test('nobody signs his way deep into the tax for a role player', () => {
   const r = rules()
   const rng = makeRng(3)

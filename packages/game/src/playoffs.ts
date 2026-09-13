@@ -10,6 +10,7 @@
 // Finals home court goes to the better regular-season record, ties broken by the standings ladder.
 
 import type { Rng } from '@hoops/core'
+import { applyFinalsHonors } from './awards.ts'
 import { addDays } from './dates.ts'
 import { playGame } from './play.ts'
 import { leagueOrder, seedConference } from './standings.ts'
@@ -310,6 +311,19 @@ function nextRound(state: GameState, po: PlayoffState): SeriesState[] | null {
   return out
 }
 
+function crown(state: GameState, final: SeriesState): void {
+  const po = state.playoffs as PlayoffState
+  po.championTeamId = final.winnerTeamId
+  po.runnerUpTeamId = final.winnerTeamId === final.highTeamId ? final.lowTeamId : final.highTeamId
+  if (final.winnerTeamId) applyFinalsHonors(state, final.games, final.winnerTeamId)
+  pushLog(state, {
+    date: state.calendar.date,
+    yearEnd: state.season.yearEnd,
+    kind: 'phase',
+    text: `${po.championTeamId} win the ${state.season.seasonId} championship`,
+  })
+}
+
 /** One playoff day: every live series plays a game. Returns true while the playoffs continue. */
 export function playoffDay(state: GameState, hooks: GameHooks, rng: Rng): boolean {
   const po = state.playoffs as PlayoffState
@@ -325,6 +339,11 @@ export function playoffDay(state: GameState, hooks: GameHooks, rng: Rng): boolea
         text: `${s.winnerTeamId} win the series ${Math.max(s.highWins, s.lowWins)}-${Math.min(s.highWins, s.lowWins)} over ${s.winnerTeamId === s.highTeamId ? s.lowTeamId : s.highTeamId}`,
       })
     }
+    const final = live.find((s) => s.bracket === 'Finals' && s.winnerTeamId)
+    if (final) {
+      crown(state, final)
+      return false
+    }
     return true
   }
   const next = nextRound(state, po)
@@ -333,13 +352,6 @@ export function playoffDay(state: GameState, hooks: GameHooks, rng: Rng): boolea
     return true
   }
   const final = (po.rounds[po.rounds.length - 1] as SeriesState[])[0] as SeriesState
-  po.championTeamId = final.winnerTeamId
-  po.runnerUpTeamId = final.winnerTeamId === final.highTeamId ? final.lowTeamId : final.highTeamId
-  pushLog(state, {
-    date: state.calendar.date,
-    yearEnd: state.season.yearEnd,
-    kind: 'phase',
-    text: `${po.championTeamId} win the ${state.season.seasonId} championship`,
-  })
+  crown(state, final)
   return false
 }

@@ -29,6 +29,8 @@ export interface DynastyState {
   gamesPlayed: number
   gamesTotal: number
   seasonComplete: boolean
+  /** Computer rewrites your rotation on injury and return, and week/month keep going. */
+  autoLineup: boolean
 }
 
 export interface StandingsRow {
@@ -92,6 +94,8 @@ export type SimInterrupt =
       games: number
       injuryName: string
       teamId: string
+      /** True when this is a knock: he can dress, but playing him risks a real absence. */
+      warning: boolean
     }
   | {
       kind: 'allstar'
@@ -109,6 +113,40 @@ export type SimInterrupt =
       userWins: number
       userLosses: number
     }
+  | {
+      kind: 'champion'
+      yearEnd: number
+      championTeamId: string
+      championName: string
+      runnerUpTeamId: string
+      runnerUpName: string
+      championWins: number
+      runnerUpWins: number
+      yours: 'won' | 'finals' | 'out'
+      /** Optional so older interrupts still type-check. */
+      finalsMvpName?: string | null
+    }
+  | {
+      kind: 'return'
+      playerId: string
+      name: string
+      games: number
+      injuryName: string
+      teamId: string
+    }
+  | {
+      kind: 'offer'
+      otherTeamId: string
+      otherName: string
+      user: TradePackage
+      other: TradePackage
+      theyWant: string[]
+      theyGive: string[]
+      theyWantPicks: number
+      theyGivePicks: number
+      reason: string
+      net: number
+    }
 
 /** @deprecated Use SimInterrupt. Kept so older call sites type-check during the rename. */
 export type InjuryInterrupt = Extract<SimInterrupt, { kind: 'injury' }>
@@ -118,7 +156,7 @@ export interface DayReport {
   date: string
   games: PlayedGame[]
   news: NewsItem[]
-  /** Set when a recap (injury, All-Star, end of the regular season) ended a multi-day sim. */
+  /** Set when a recap (injury, offer, All-Star, end of the regular season) ended a multi-day sim. */
   interrupt?: SimInterrupt
 }
 
@@ -182,6 +220,26 @@ export interface RosterRow {
   contractYears: number
   /** One sentence: iron man, typical, or injury candidate, from durability and prior seasons. */
   injuryHint?: string
+  /**
+   * Games he is likely to miss this season at his current minutes. Same model as `injuryHint`.
+   */
+  injuryRisk?: {
+    label: 'iron' | 'typical' | 'fragile' | 'mileage' | 'candidate'
+    gamesOut: number
+    short: string
+    text: string
+  }
+  /**
+   * What's wrong with him right now. Absent when he is fit, or when an old injury is only a
+   * lingering-penalty memory and he is already dressing.
+   */
+  injury?: {
+    name: string
+    /** Games still to miss, or the warning's remaining days if he sits. */
+    games: number
+    warning: boolean
+    playingThrough?: boolean
+  }
 }
 
 export interface TeamFinance {
@@ -192,6 +250,12 @@ export interface TeamFinance {
   apron1: number | null
   apron2: number | null
   roster: number
+  rosterMin: number
+  rosterMax: number
+  /** Who may dress tonight. 12 in older eras; not the roster cap. */
+  rosterActive: number
+  /** Waived salary still counting this year. */
+  deadCap: number
   /** Luxury tax owed on this payroll. 0 when under the line or the era has no tax. */
   taxBill: number
   /** True when this bill uses repeater rates. */
@@ -249,6 +313,7 @@ export interface DynastyModule {
 
 import type {
   NamedLineups,
+  NamedUnitStyles,
   OffenseSystemId,
   PlayerInstruction,
   Position,
@@ -277,10 +342,18 @@ export interface TeamPlan {
    * Bench or Closing five opts the team into unit rotation.
    */
   lineups: NamedLineups
+  /**
+   * How each named five plays. Empty means every group uses the team instructions.
+   */
+  unitTactics: NamedUnitStyles
   /** The offensive system. 'balanced' is no system at all. */
   system: OffenseSystemId
   /** Per-player instructions, by player id. Absent means he plays his own game. */
   instructions: Record<string, PlayerInstruction>
+  /** Load management. Absent or missing id = play every night he is fit. */
+  rest?: Record<string, 'b2b' | 'manage'>
+  /** Sit these men the next game, then clear. */
+  sitNext?: string[]
 }
 
 export interface PickRef {
@@ -331,6 +404,8 @@ export interface PlayerDesk {
   offers: { other: TradePackage; user: TradePackage; assessment: TradeAssessment }[]
   /** Names for ids in those offers, so the card does not have to load every block. */
   names: Record<string, string>
+  /** Cut him, if the roster is above the era minimum. */
+  waive: { ok: boolean; reason: string } | null
   contract: {
     kind: 'fa' | 'extend' | 'none'
     asking: number
@@ -428,6 +503,15 @@ export interface GameLogRow {
   opponentPts: number
   started: boolean
   line: StatLine
+  /** Regular season, play-in, or playoffs. Older callers may omit it; treat as regular. */
+  seasonType?: 'regular' | 'playin' | 'playoffs'
+  /**
+   * True when this line was rebuilt from the playoff summary (pts/reb/ast/min only), not a box.
+   * Shooting columns are unknown.
+   */
+  thin?: boolean
+  /** He was on the roster that night and did not dress. Distinct from a missing box. */
+  dnp?: boolean
 }
 
 export interface ManagerActions {
@@ -440,6 +524,19 @@ export interface ManagerActions {
   // Tactics and the depth chart.
   getPlan(teamId: string): TeamPlan
   setPlan(teamId: string, plan: Partial<TeamPlan>): void
+
+  /**
+   * After the injury pause: sit him and let the computer rewrite the rotation, or keep a
+   * warning in the lineup and risk the next tier. Healing puts a covered man back in the
+   * rotation on its own; `restore` is the optional full rebalance.
+   */
+  resolveInjury(playerId: string, choice: 'cover' | 'playThrough' | 'restore'): void
+
+  /** Sit him tonight, or take him off the one-game hold. Does not change the season plan. */
+  sitTonight(playerId: string, sit: boolean): void
+
+  /** Computer handles injuries and returns so a week or month can keep playing. */
+  setAutoLineup(on: boolean): void
 
   // Trades.
   tradeBlock(teamId: string): TradeBlockPlayer[]
@@ -456,6 +553,12 @@ export interface ManagerActions {
   listOnBlock(playerId: string, on: boolean): PlayerDesk | null
   /** What the manager can do with this man: the block, offers, a contract. */
   playerDesk(playerId: string): PlayerDesk | null
+  /** Cut him. Guaranteed money stays on the cap as dead cap. */
+  waivePlayer(playerId: string): { ok: boolean; message: string; desk: PlayerDesk | null }
+  /** Unsigned players you can sign in-season, at the minimum for the rest of the year. */
+  inSeasonFreeAgents(): FreeAgentView[]
+  /** Sign one of those men to a rest-of-season minimum. Needs a roster spot. */
+  signFreeAgent(playerId: string): { ok: boolean; message: string }
   /** Add years onto a deal he already has. */
   extendContract(
     playerId: string,
@@ -472,9 +575,11 @@ export interface ManagerActions {
   advanceDraft(): OffseasonState
   /** Make your pick. */
   draftPlayer(prospectId: string): OffseasonState
-  /** Bid in the market. Replaces any previous offer for that player. */
+  /** Bid in the market. Replaces any previous offer for that player. A bid that meets his price is decided the same day. */
   makeOffer(playerId: string, amount: number, years: number): OffseasonState
   withdrawOffer(playerId: string): OffseasonState
+  /** One day of free agency: pending bids, then the rest of the league. */
+  advanceMarket(): OffseasonState
   /** Resolve the market, roll the league into the new season. */
   finishOffseason(): OffseasonState
 
@@ -579,7 +684,12 @@ export interface AllStarGame {
   date: string
   east: AllStarPick[]
   west: AllStarPick[]
-  result: { eastPts: number; westPts: number; mvpPlayerId: string | null } | null
+  result: {
+    eastPts: number
+    westPts: number
+    mvpPlayerId: string | null
+    box?: GameResult
+  } | null
 }
 
 /** What is on tonight, and what a fan would want to know before it. */
@@ -602,6 +712,23 @@ export interface GamePreview {
    * saved preview keeps working; the regular season never fills it in.
    */
   playoff?: PlayoffPreview
+  /**
+   * Who is dressing tonight, your club only. Sit someone here and it lasts one game.
+   * Optional so older callers keep working.
+   */
+  dressing?: DressingRow[]
+}
+
+export interface DressingRow {
+  playerId: string
+  name: string
+  pos: string
+  overall: number
+  sitting: boolean
+  /** bench / hurt / sat / b2b / tired */
+  why: string | null
+  risk: string
+  riskText: string
 }
 
 /** One game of a play-in or a live series, told the way a fan would tell it. */

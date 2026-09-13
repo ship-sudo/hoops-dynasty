@@ -204,7 +204,9 @@ export function NewGame() {
                 <dt>Real record that year</dt>
                 <dd>{team ? `${team.real.wins}-${team.real.losses}` : '—'}</dd>
                 <dt>Players on the books</dt>
-                <dd>{preview ? preview.finance.roster : '—'}</dd>
+                <dd>
+                  {preview ? `${preview.finance.roster} of ${preview.finance.rosterMax}` : '—'}
+                </dd>
                 <dt>Payroll</dt>
                 <dd>{money(preview?.finance.payroll)}</dd>
                 <dt>Salary cap</dt>

@@ -1,10 +1,11 @@
 // Season and history bundles from db.sqlite. Shapes are packages/core/src/bundle.ts.
 //
 // Players: everyone on an opening-night roster (see opening-night.ts). Ratings and tendencies come from
-// @hoops/ratings rateSeason. Real stats: totals summed over stints (game logs), per-100 and advanced from
-// the season-level leaguedash lines, shooting / play-by-play / PER-BPM-WS from the bref lines that
-// load-bref attached, contracts from the contracts table (Wayback 2021+, inferred before).
-// rules is seasons.rules_json (Lane C).
+// @hoops/ratings: each season is rated against its own league, then the last four years are blended
+// so a 16-game injury year does not define a star. Real stats: totals summed over stints (game logs),
+// per-100 and advanced from the season-level leaguedash lines, shooting / play-by-play / PER-BPM-WS
+// from the bref lines that load-bref attached, contracts from the contracts table (Wayback 2021+,
+// inferred before). rules is seasons.rules_json (Lane C).
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -27,10 +28,19 @@ import {
   type TeamRecord,
   type Tendencies,
 } from '@hoops/core'
-import { type RateInput, rateSeason } from '@hoops/ratings'
+import {
+  blendEvidence,
+  blendRelative,
+  type RateInput,
+  type RelativeLayer,
+  rateSeason,
+  ratingsFromRelative,
+  relativeSeason,
+  tendenciesFromStats,
+} from '@hoops/ratings'
 import { all, one } from '../db/db.ts'
 import { eraContextFrom, type TeamSeasonLine, type ZoneBaseline } from './era-context.ts'
-import { openingNightRosters } from './opening-night.ts'
+import { capWeight, openingNightRosters } from './opening-night.ts'
 import { BOX_KEYS, type BoxTotals, emptyTotals } from './stints.ts'
 
 // ---- db row shapes -------------------------------------------------------------------------------
@@ -484,33 +494,95 @@ function seasonPlayers(
   return out
 }
 
-function rateAll(
-  players: Iterable<SeasonPlayer>,
-  prior: Map<string, SeasonPlayer> = new Map(),
-  older: Map<string, SeasonPlayer> = new Map(),
-) {
-  const inputs: RateInput[] = []
-  const guessed = new Map<string, { ratings: Ratings; tendencies: Tendencies }>()
-  for (const p of players) {
-    const stats =
-      p.stats && p.stats.min > 0
-        ? p.stats
-        : (prior.get(p.row.player_id)?.stats ?? older.get(p.row.player_id)?.stats ?? null)
-    if (!stats || stats.min <= 0) {
-      guessed.set(p.row.player_id, guessRookie(p))
-      continue
-    }
-    inputs.push({
+function asRateInputs(people: Map<string, SeasonPlayer>): RateInput[] {
+  const seasonGames = Math.max(50, ...[...people.values()].map((p) => p.stats?.gp ?? 0))
+  const out: RateInput[] = []
+  for (const p of people.values()) {
+    out.push({
       playerId: p.row.player_id,
       pos: p.pos,
       age: p.age,
       heightIn: p.heightIn,
       weightLb: p.weightLb,
-      stats,
+      stats: statsWithMinutes(p.stats),
+      teamGames: seasonGames,
     })
   }
-  const rated = rateSeason(inputs)
-  for (const [id, g] of guessed) rated.set(id, g)
+  return out
+}
+
+/** Newest first. A healthy year two seasons ago still counts; a cameo this year does not dominate. */
+const RECENCY = [1, 0.7, 0.5, 0.35]
+
+function rateAll(
+  players: Iterable<SeasonPlayer>,
+  league: Map<string, SeasonPlayer> = new Map(),
+  history: Map<string, SeasonPlayer>[] = [],
+) {
+  const list = [...players]
+  if (history.length === 0 && league.size === 0) {
+    const inputs: RateInput[] = []
+    const guessed = new Map<string, { ratings: Ratings; tendencies: Tendencies }>()
+    for (const p of list) {
+      const stats = statsWithMinutes(p.stats)
+      if (!stats) {
+        guessed.set(p.row.player_id, guessRookie(p))
+        continue
+      }
+      inputs.push({
+        playerId: p.row.player_id,
+        pos: p.pos,
+        age: p.age,
+        heightIn: p.heightIn,
+        weightLb: p.weightLb,
+        stats,
+      })
+    }
+    const rated = rateSeason(inputs)
+    for (const [id, g] of guessed) rated.set(id, g)
+    return rated
+  }
+
+  const layers = [league, ...history].filter((m) => m.size > 0)
+  const rels = layers.map((m) => relativeSeason(asRateInputs(m)))
+  const rated = new Map<string, { ratings: Ratings; tendencies: Tendencies }>()
+  for (const p of list) {
+    const id = p.row.player_id
+    const stack: RelativeLayer[] = []
+    let recencyAt = 0
+    let tendStats: PlayerSeasonStats | null = null
+    for (let i = 0; i < layers.length; i++) {
+      const sp = layers[i]?.get(id)
+      const rel = rels[i]?.get(id)
+      const min = sp?.stats?.min ?? 0
+      if (!rel || min < 1) continue
+      stack.push({ relative: rel, minutes: min, recency: RECENCY[recencyAt] ?? 0.25 })
+      recencyAt++
+    }
+    for (const layer of layers) {
+      const min = layer.get(id)?.stats?.min ?? 0
+      if (min >= 1000) {
+        tendStats = layer.get(id)?.stats ?? null
+        break
+      }
+    }
+    if (!tendStats)
+      for (const layer of layers) {
+        const min = layer.get(id)?.stats?.min ?? 0
+        if (min >= 50) {
+          tendStats = layer.get(id)?.stats ?? null
+          break
+        }
+      }
+    if (stack.length === 0) {
+      rated.set(id, guessRookie(p))
+      continue
+    }
+    rated.set(id, {
+      ratings: ratingsFromRelative(blendRelative(stack), blendEvidence(stack)),
+      tendencies: tendenciesFromStats(tendStats),
+    })
+  }
   return rated
 }
 
@@ -652,6 +724,23 @@ export function buildSeasonBundle(
     real: { wins: t.wins ?? 0, losses: t.losses ?? 0, playoffSeed: t.playoff_seed },
   }))
   const people = seasonPlayers(db, yearEnd, openingDate)
+  const lastYear =
+    yearEnd - 1 >= firstLoaded
+      ? seasonPlayers(db, yearEnd - 1, openingDateOf(db, yearEnd - 1))
+      : undefined
+  const weight = new Map<string, number>()
+  for (const [id, p] of people) {
+    const prior = lastYear?.get(id)?.stints.reduce((s, x) => s + x.min, 0) ?? 0
+    weight.set(
+      id,
+      capWeight({
+        priorMin: prior,
+        yearEnd,
+        draftYear: p.row.draft_year,
+        draftPick: p.row.draft_pick,
+      }),
+    )
+  }
   const on = openingNightRosters(
     [...people.values()].flatMap((p) =>
       p.stints.map((s) => ({
@@ -665,32 +754,34 @@ export function buildSeasonBundle(
     [...people.values()]
       .filter((p) => p.roster)
       .map((p) => ({ playerId: p.row.player_id, teamId: (p.roster as RosterRow).team_id })),
+    20,
+    weight,
   )
   const chosen = on.entries
     .map((e) => ({ e, p: people.get(e.playerId) as SeasonPlayer }))
     .filter((x) => x.p !== undefined)
-  const prior =
-    yearEnd > firstLoaded
-      ? seasonPlayers(db, yearEnd - 1, openingDateOf(db, yearEnd - 1))
-      : new Map<string, SeasonPlayer>()
-  const older =
-    yearEnd - 1 > firstLoaded
-      ? seasonPlayers(db, yearEnd - 2, openingDateOf(db, yearEnd - 2))
-      : new Map<string, SeasonPlayer>()
+  const historyYears: Map<string, SeasonPlayer>[] = []
+  if (lastYear) historyYears.push(lastYear)
+  for (let back = 2; back <= 3; back++) {
+    if (yearEnd - back < firstLoaded) break
+    historyYears.push(seasonPlayers(db, yearEnd - back, openingDateOf(db, yearEnd - back)))
+  }
   const rated = rateAll(
     chosen.map((x) => x.p),
-    prior,
-    older,
+    people,
+    historyYears,
   )
   const contracts = contractsFor(db, yearEnd)
   const players: PlayerRecord[] = chosen.map(({ e, p }) => {
     const r = rated.get(p.row.player_id)
     if (!r) throw new Error(`no rating for ${p.row.player_id}`)
     const row = p.row
-    const last =
-      statsWithMinutes(p.stats) ??
-      statsWithMinutes(prior.get(row.player_id)?.stats) ??
-      statsWithMinutes(older.get(row.player_id)?.stats)
+    let last = statsWithMinutes(p.stats)
+    if (!last)
+      for (const yr of historyYears) {
+        last = statsWithMinutes(yr.get(row.player_id)?.stats)
+        if (last) break
+      }
     const mpg = last && last.gp > 0 ? last.min / last.gp : 0
     return {
       playerId: row.player_id,
