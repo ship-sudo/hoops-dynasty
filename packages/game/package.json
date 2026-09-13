@@ -1,0 +1,17 @@
+{
+  "name": "@hoops/game",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hoops/core": "*",
+    "@hoops/engine": "*",
+    "@hoops/data": "*",
+    "@hoops/injury": "*",
+    "@hoops/progression": "*"
+  },
+  "comment": "@hoops/engine and @hoops/data are imported by src/cli.ts only. The reducers take the engine and the era table by injection. @hoops/injury and @hoops/progression are pure functions over @hoops/core with no I/O, and the season loop cannot run availability or rank a depth chart without them, so they are imported directly."
+}

@@ -1,0 +1,12 @@
+{
+  // Node/DOM-free packages only. apps/web needs DOM + JSX, so it has its own
+  // apps/web/tsconfig.json and is typechecked by `npm run build`.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "composite": false,
+    "declaration": false
+  },
+  "include": ["packages/*/src"]
+}

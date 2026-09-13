@@ -1,0 +1,540 @@
+/*
+ * The spectacle screens: Home, League, Awards, All-Star, Playoffs.
+ *
+ * Everything here is prefixed `lg-` and lives only in these five files, so it can never collide
+ * with the shared furniture in styles.css. Colours come from the custom properties defined there;
+ * nothing invents its own.
+ */
+
+/* ── shared bits ─────────────────────────────────────────────────────────── */
+
+/** A row of headline numbers: the thing you read before you read anything else. */
+.lg-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+}
+.lg-tile {
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--pri, var(--line));
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.lg-tile .k {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lg-tile .v {
+  font-family: var(--mono);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.lg-tile .s {
+  font-size: 11px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/** Form: five little squares, newest first. Reads at a glance in a way W/L letters do not. */
+.lg-form {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+.lg-form i {
+  width: 9px;
+  height: 9px;
+  border-radius: 1px;
+  background: var(--line);
+  font-style: normal;
+}
+.lg-form i.w {
+  background: var(--win);
+}
+.lg-form i.l {
+  background: var(--loss);
+}
+
+.lg-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.lg-link:hover {
+  color: var(--accent-ink);
+  text-decoration: underline;
+}
+
+/** The category switcher on the leaderboards, and anything else that is a row of toggles. */
+.lg-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.lg-switch button {
+  font-size: 11px;
+  padding: 3px 9px;
+  color: var(--ink-dim);
+}
+.lg-switch button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* ── Home ────────────────────────────────────────────────────────────────── */
+
+.lg-home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 348px;
+  gap: 12px;
+  align-items: start;
+}
+.lg-home > div {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+}
+@media (max-width: 1080px) {
+  .lg-home {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/** Tonight's game, drawn like the graphic a broadcast puts up before tip-off. */
+.lg-scoreboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+.lg-side {
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  border-top: 3px solid var(--pri, var(--line));
+  min-width: 0;
+}
+.lg-side.me {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+}
+.lg-side .club {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lg-side .rec {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.lg-side .man {
+  margin-top: 6px;
+  font-size: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+.lg-side .man .mn {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lg-side .club .sd {
+  display: inline-block;
+  min-width: 17px;
+  margin-right: 6px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  color: var(--ink-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  vertical-align: 1px;
+}
+
+/** The live series, under the scoreboard: where it stands and what tonight settles. */
+.lg-po {
+  margin-top: 10px;
+  padding: 9px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+.lg-po .hd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.lg-po .hd .sl {
+  font-size: 15px;
+}
+.lg-po .hd .faint {
+  font-size: 11px;
+}
+.lg-po .stake {
+  margin-top: 4px;
+  color: var(--warn);
+  font-size: 12px;
+}
+.lg-po .games {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.lg-po .games .gn {
+  color: var(--ink-dim);
+  margin-right: 5px;
+}
+.lg-po .games .faint {
+  font-size: 11px;
+  margin-left: 5px;
+}
+.lg-po .brk {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/** No game to play: knocked out, missed it, or holding the trophy. */
+.lg-out {
+  padding: 9px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+}
+
+.lg-vs {
+  align-self: center;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  padding: 0 2px;
+}
+@media (max-width: 620px) {
+  .lg-scoreboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/** The inbox's rumour and offer items, which are the ones worth looking at. */
+.lg-feed article.rumour {
+  border-left: 2px solid var(--warn);
+}
+.lg-feed article.offer {
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.lg-feed .act {
+  margin-top: 5px;
+}
+
+/* ── vote-share bars, used by Awards and by Home's MVP strip ─────────────── */
+
+.lg-race {
+  display: grid;
+  gap: 8px;
+}
+.lg-cand {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+.lg-cand .rank {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink-faint);
+}
+.lg-cand.lead .rank {
+  color: var(--warn);
+}
+.lg-cand .who {
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lg-cand .share {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+}
+.lg-cand .track {
+  grid-column: 2 / -1;
+  height: 7px;
+  background: var(--panel-2);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.lg-cand .track > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.lg-cand.lead .track > span {
+  background: var(--warn);
+}
+.lg-cand .line {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.lg-cand .case {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  color: var(--ink);
+  margin: 0;
+}
+
+.lg-three {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 1180px) {
+  .lg-three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── League ──────────────────────────────────────────────────────────────── */
+
+.lg-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 1180px) {
+  .lg-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/** Every category at once, three deep: the page a fan scrolls for no reason at all. */
+.lg-glance {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(198px, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+}
+.lg-glance section {
+  background: var(--panel);
+  padding: 7px 10px;
+}
+.lg-glance h4 {
+  margin: 0 0 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-faint);
+}
+.lg-glance ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+.lg-glance li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.lg-glance li .nm {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lg-glance li .vl {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ── All-Star ────────────────────────────────────────────────────────────── */
+
+.lg-allstar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .lg-allstar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.lg-final {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 18px;
+  padding: 14px 10px;
+}
+.lg-final .conf {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+}
+.lg-final .pts {
+  font-family: var(--mono);
+  font-size: 34px;
+  font-weight: 700;
+}
+.lg-final .pts.won {
+  color: var(--win);
+}
+.lg-subhead {
+  padding: 5px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-faint);
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+}
+
+/* ── Playoffs ────────────────────────────────────────────────────────────── */
+
+.lg-bracket {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.lg-round {
+  display: grid;
+  align-content: space-around;
+  gap: 10px;
+  min-width: 232px;
+  flex: 1 1 232px;
+}
+.lg-round > h4 {
+  margin: 0;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-faint);
+  text-align: center;
+}
+.lg-series {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  width: 100%;
+  color: inherit;
+  font: inherit;
+}
+.lg-series:hover {
+  border-color: var(--accent);
+}
+.lg-series[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.lg-series .team {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-left: 3px solid var(--pri, transparent);
+}
+.lg-series .team + .team {
+  border-top: 1px solid var(--line-soft);
+}
+.lg-series .team .sd {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+  width: 14px;
+}
+.lg-series .team .nm {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lg-series .team .wn {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink-dim);
+}
+.lg-series .team.out {
+  opacity: 0.55;
+}
+.lg-series .team.won .wn {
+  color: var(--win);
+}
+.lg-series .team.mine {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.lg-series .foot {
+  display: block;
+  padding: 3px 9px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-faint);
+  background: var(--panel-2);
+  border-top: 1px solid var(--line-soft);
+}
+.lg-champ {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 16px 10px;
+  text-align: center;
+}
+.lg-champ .cup {
+  font-size: 26px;
+  color: var(--warn);
+}
+.lg-champ .cn {
+  font-size: 19px;
+  font-weight: 700;
+}

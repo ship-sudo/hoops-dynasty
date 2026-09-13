@@ -1,0 +1,201 @@
+/*
+ * The dressing room: roles, morale, and the panel that says what to do about it.
+ *
+ * Everything here is prefixed `mr-` and is imported only by Roster.tsx, so it can never collide
+ * with the shared furniture in styles.css or with any other screen's sheet. Colours come from the
+ * custom properties defined there; nothing invents its own hue.
+ */
+
+/* ── the mood scale ──────────────────────────────────────────────────────── */
+
+/* One ramp, six stops, used identically by the pill, the bar and the panel. `--win` and `--loss`
+   already carry the app's good/bad, so a happy man reads the same green as a win. */
+.mr-delighted {
+  --mr: var(--win);
+}
+.mr-happy {
+  --mr: color-mix(in srgb, var(--win) 72%, var(--ink-faint));
+}
+.mr-content {
+  --mr: var(--ink-faint);
+}
+.mr-restless {
+  --mr: var(--warn);
+}
+.mr-unhappy {
+  --mr: color-mix(in srgb, var(--loss) 70%, var(--warn));
+}
+.mr-furious {
+  --mr: var(--loss);
+}
+
+/* ── in a table cell ─────────────────────────────────────────────────────── */
+
+/** The number, with a bar under it: readable at a glance down a column of fifteen. */
+.mr-cell {
+  display: inline-grid;
+  gap: 2px;
+  justify-items: end;
+  min-width: 34px;
+}
+.mr-cell b {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--mr, var(--ink));
+  line-height: 1;
+}
+.mr-bar {
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.mr-bar i {
+  display: block;
+  height: 100%;
+  background: var(--mr, var(--ink-faint));
+}
+
+/** The role, as a quiet tag. Star gets the accent; nothing else shouts. */
+.mr-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.mr-role.star {
+  color: var(--accent, var(--ink));
+  font-weight: 700;
+}
+
+/** "wants out" — the one thing on the screen that is allowed to be loud. */
+.mr-out {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--loss);
+  border: 1px solid color-mix(in srgb, var(--loss) 45%, transparent);
+  border-radius: 3px;
+  padding: 0 3px;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* ── the squad panel ─────────────────────────────────────────────────────── */
+
+.mr-room {
+  display: grid;
+  gap: 8px;
+}
+.mr-room .mr-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.mr-room .mr-label {
+  font-size: 15px;
+  font-weight: 700;
+  text-transform: capitalize;
+  color: var(--mr, var(--ink));
+}
+.mr-room .mr-avg {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.mr-room p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-dim);
+  line-height: 1.45;
+}
+
+/** The two or three men to look at, worst first. */
+.mr-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mr-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  padding: 5px 7px;
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--mr, var(--line));
+  border-radius: var(--radius-sm);
+}
+.mr-list .n {
+  font-weight: 600;
+  font-size: 12px;
+}
+.mr-list .v {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mr, var(--ink));
+}
+.mr-list .w {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--ink-dim);
+  line-height: 1.35;
+}
+
+/* ── the breakdown on a player card ──────────────────────────────────────── */
+
+.mr-why {
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+.mr-terms {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mr-terms li {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--ink-dim);
+  line-height: 1.4;
+}
+.mr-terms .d {
+  font-family: var(--mono);
+  text-align: right;
+  font-weight: 700;
+}
+.mr-terms .d.neg {
+  color: var(--loss);
+}
+.mr-terms .d.pos {
+  color: var(--win);
+}
+
+/** The gap between what his role expects and what he is getting, as a sentence of numbers. */
+.mr-gap {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  flex-wrap: wrap;
+}
+.mr-gap b {
+  font-family: var(--mono);
+  color: var(--ink);
+}

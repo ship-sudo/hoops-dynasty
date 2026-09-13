@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": ["vite/client", "node"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "paths": {
+      "@hoops/core": ["../../packages/core/src/index.ts"],
+      "@hoops/engine": ["../../packages/engine/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

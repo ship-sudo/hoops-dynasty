@@ -1,0 +1,8 @@
+season,lg,player,player_id,age,team,pos,g,gs,mp,fg_percent,avg_dist_fga,percent_fga_from_x2p_range,percent_fga_from_x0_3_range,percent_fga_from_x3_10_range,percent_fga_from_x10_16_range,percent_fga_from_x16_3p_range,percent_fga_from_x3p_range,fg_percent_from_x2p_range,fg_percent_from_x0_3_range,fg_percent_from_x3_10_range,fg_percent_from_x10_16_range,fg_percent_from_x16_3p_range,fg_percent_from_x3p_range,percent_assisted_x2p_fg,percent_assisted_x3p_fg,percent_dunks_of_fga,num_of_dunks,percent_corner_3s_of_3pa,corner_3_point_percent,num_heaves_attempted,num_heaves_made
+2026,NBA,Precious Achiuwa,achiupr01,26,SAC,C,73,57,1745,0.528,7.8,0.838,0.371,0.395,0.064,0.007,0.162,0.577,0.707,0.513,0.289,0,0.278,0.543,1,0.135,68,0.412,0.25,0,0
+2026,NBA,Ochai Agbaji,agbajoc01,25,2TM,SG,62,13,973,0.436,13.7,0.543,0.346,0.161,0.025,0.011,0.457,0.579,0.711,0.311,0.571,0.333,0.266,0.83,0.941,0.111,26,0.43,0.236,0,0
+2026,NBA,Ochai Agbaji,agbajoc01,25,TOR,SG,42,13,650,0.424,11.1,0.618,0.441,0.159,0.012,0.006,0.382,0.571,0.667,0.296,1,0,0.185,0.783,1,0.141,19,0.523,0.206,0,0
+2026,NBA,Ochai Agbaji,agbajoc01,25,BRK,SG,20,0,323,0.455,16.4,0.427,0.2,0.164,0.045,0.018,0.573,0.596,0.864,0.333,0.4,0.5,0.349,0.929,0.909,0.064,7,0.333,0.286,0,0
+2026,NBA,Jimmy Butler,butleji01,36,GSW,SF,38,38,1182,0.519,9.3,0.816,0.342,0.303,0.121,0.05,0.184,0.552,0.741,0.479,0.375,0.13,0.376,0.505,0.719,0.067,30,0.435,0.432,0,0
+2026,NBA,Nikola Jokić,jokicni01,30,DEN,C,65,65,2265,0.569,11.5,0.739,0.216,0.374,0.11,0.04,0.261,0.636,0.755,0.589,0.597,0.533,0.38,0.564,0.804,0.019,19,0.061,0.556,0,0
+1997,NBA,Mahmoud Abdul-Rauf,abdulma02,27,SAC,PG,75,51,2131,0.445,18.1,0.734,0.067,0.026,0.133,0.508,0.266,0.468,0.484,0.375,0.423,0.482,0.382,0.58,0.734,0,0,0.045,0.364,0,0

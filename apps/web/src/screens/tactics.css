@@ -1,0 +1,522 @@
+/*
+ * The coach's screen. Everything here is prefixed `tc-` and is imported only by Tactics.tsx, so it
+ * can never collide with the shared furniture in styles.css. Colours come from the custom
+ * properties defined there; nothing invents its own.
+ */
+
+/* ── the minutes budget: the number he should see first ───────────────────── */
+
+.tc-budget {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+.tc-budget.over {
+  border-left-color: var(--loss);
+}
+.tc-budget.done {
+  border-left-color: var(--win);
+}
+.tc-budget .big {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.tc-budget.over .big {
+  color: var(--loss);
+}
+.tc-budget.done .big {
+  color: var(--win);
+}
+.tc-budget .what {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.tc-budget .of {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* ── the starting five ────────────────────────────────────────────────────── */
+
+.tc-five {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tc-units {
+  display: grid;
+  gap: 10px;
+}
+.tc-unit-name {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  color: var(--muted, #6b7280);
+}
+@media (max-width: 1080px) {
+  .tc-five {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .tc-five {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.tc-slot {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.tc-slot.empty {
+  border-top-color: var(--line);
+}
+.tc-slot.misfit {
+  border-top-color: var(--warn);
+}
+.tc-slot.misfit.bad {
+  border-top-color: var(--loss);
+}
+.tc-slot .pos {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+.tc-slot select {
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+}
+.tc-slot .who {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.tc-slot .who b {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tc-slot .ht {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  flex: none;
+}
+.tc-slot .ovr {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  margin-left: auto;
+}
+.tc-slot .note {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--warn);
+}
+.tc-slot .note.bad {
+  color: var(--loss);
+}
+.tc-slot .note.fine {
+  color: var(--ink-faint);
+}
+.tc-slot .mins {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+/* ── the rotation table ───────────────────────────────────────────────────── */
+
+.tc-rota td,
+.tc-rota th {
+  vertical-align: middle;
+}
+.tc-rota tr.tc-open > td {
+  border-bottom: 0;
+}
+
+/* A man's instructions, as chips you can read without stopping. */
+.tc-chips {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.tc-chip {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  background: var(--panel-2);
+  white-space: nowrap;
+}
+/* A man sent out to the arc reads in the club colour; one sent to the block reads warm; the glass
+   green and the stopper red. Built from the theme's own tokens, so both themes get it right. */
+.tc-chip.arc {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.tc-chip.block {
+  border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+}
+.tc-chip.glass {
+  border-color: color-mix(in srgb, var(--win) 50%, transparent);
+  background: color-mix(in srgb, var(--win) 13%, transparent);
+  color: var(--win);
+}
+.tc-chip.lock {
+  border-color: color-mix(in srgb, var(--loss) 50%, transparent);
+  background: color-mix(in srgb, var(--loss) 13%, transparent);
+  color: var(--loss);
+}
+.tc-chip.quiet {
+  opacity: 0.75;
+}
+
+.tc-name {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 650;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.tc-name:hover {
+  color: var(--accent);
+}
+.tc-slot .tc-name {
+  min-width: 0;
+  overflow: hidden;
+}
+.tc-slot .good,
+.tc-rota .good,
+.tc-pop .good {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--ink-faint);
+  margin: 0;
+}
+
+/* Compact player overlay: identity, standouts, minutes, named roles. */
+.tc-pop {
+  padding: 12px 14px 14px;
+  display: grid;
+  gap: 10px;
+}
+.tc-pop .facts {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.tc-pop .facts b {
+  font-family: var(--mono);
+  color: var(--ink);
+}
+.tc-pop .facts .mins {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.tc-pop .roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.tc-shoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.tc-shoot .lbl {
+  width: 100%;
+  font-size: 10px;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tc-shoot b,
+.tc-hints b {
+  font-family: var(--mono);
+  font-weight: 650;
+  color: var(--ink);
+}
+.tc-shoot b.win,
+.tc-hints b.win {
+  color: var(--win);
+}
+.tc-shoot b.loss,
+.tc-hints b.loss {
+  color: var(--loss);
+}
+.tc-hints {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-right: 2px;
+  color: var(--ink-dim);
+}
+.tc-preset {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.tc-preset:hover {
+  background: var(--row-hover);
+}
+.tc-preset[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* The editor that drops out of a row. */
+.tc-editor {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(216px, 1fr));
+  gap: 10px 14px;
+  padding: 10px 12px 12px;
+  background: var(--panel-2);
+  border-left: 3px solid var(--accent);
+}
+/* Without this a grid item is as wide as its longest sentence and the columns blow apart. */
+.tc-editor .lever {
+  min-width: 0;
+}
+/* The before-and-after runs the width of the row: it is the answer, not one lever among five. */
+.tc-editor .diet {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.tc-editor .diet .line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin-top: 4px;
+}
+.tc-editor .diet .line .tc-mix {
+  width: 200px;
+  flex: none;
+}
+.tc-editor .diet .line b {
+  font-family: var(--mono);
+  color: var(--ink);
+}
+.tc-editor .lever > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.tc-editor .lever strong {
+  font-size: 11px;
+}
+.tc-editor .lever .now {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+.tc-editor .lever p {
+  margin: 3px 0 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+.tc-editor .segmented button {
+  font-size: 10px;
+  padding: 3px 4px;
+}
+
+.tc-pop .tc-editor {
+  grid-template-columns: 1fr;
+  padding: 0;
+  background: transparent;
+  border-left: 0;
+}
+.tc-pop .tc-editor .diet {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.tc-minsel {
+  width: 56px;
+}
+
+/* What his shot mix actually becomes. The honest bit. */
+.tc-mix {
+  display: flex;
+  height: 7px;
+  border-radius: 1px;
+  overflow: hidden;
+  background: var(--line-soft);
+  min-width: 64px;
+}
+.tc-mix i {
+  display: block;
+  height: 100%;
+}
+/* Four zones, inside to out. Fixed hues, because these name a place on the floor rather than a
+   state, and both grounds carry them. */
+.tc-mix .z0 {
+  background: #8a6438;
+}
+.tc-mix .z1 {
+  background: #b08a4e;
+}
+.tc-mix .z2 {
+  background: #6b7686;
+}
+.tc-mix .z3 {
+  background: #3f6f9e;
+}
+
+/* ── the system picker ────────────────────────────────────────────────────── */
+
+.tc-systems {
+  display: grid;
+  gap: 6px;
+}
+.tc-sys {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+}
+.tc-sys:hover {
+  background: var(--row-hover);
+}
+.tc-sys[aria-pressed="true"] {
+  border-left-color: var(--accent);
+  background: var(--row-hover);
+}
+.tc-sys .head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tc-sys .head b {
+  font-size: 13px;
+}
+.tc-fit {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.tc-fit.strong {
+  border-color: color-mix(in srgb, var(--win) 50%, transparent);
+  color: var(--win);
+  background: color-mix(in srgb, var(--win) 13%, transparent);
+}
+.tc-fit.workable {
+  border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+}
+.tc-fit.poor {
+  border-color: color-mix(in srgb, var(--loss) 50%, transparent);
+  color: var(--loss);
+  background: color-mix(in srgb, var(--loss) 13%, transparent);
+}
+.tc-sys .blurb {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+.tc-sys dl {
+  margin: 2px 0 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 7px;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.tc-sys dt {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  padding-top: 2px;
+}
+.tc-sys dd {
+  margin: 0;
+  color: var(--ink-dim);
+}
+.tc-sys dd.cost {
+  color: var(--warn);
+}
+.tc-sys .verdict {
+  margin: 2px 0 0;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}

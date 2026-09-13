@@ -1,0 +1,6 @@
+player,player_id,pos,ht_in_in,wt,birth_date,colleges,from,to,debut,hof
+Hank Biasatti,biasaha01,G,71,175,1922-01-14,Assumption University,1947,1947,1946-11-01T00:00:00Z,FALSE
+Michael Jordan,jordami01,G-F,78,198,1963-02-17,UNC,1985,2003,1984-10-26T00:00:00Z,TRUE
+Jimmy Butler,butleji01,F-G,78,230,1989-09-14,"Tyler Junior College, Marquette",2012,2026,2012-01-01T00:00:00Z,FALSE
+Nikola Jokić,jokicni01,C-F,83,284,1995-02-19,NA,2016,2026,2015-10-28T00:00:00Z,FALSE
+Precious Achiuwa,achiupr01,F,80,243,1999-09-19,Memphis,2021,2026,2020-12-23T00:00:00Z,FALSE

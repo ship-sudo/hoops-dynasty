@@ -1,0 +1,122 @@
+{
+  "resultSets": [
+    {
+      "name": "CommonTeamRoster",
+      "headers": [
+        "TeamID",
+        "SEASON",
+        "LeagueID",
+        "PLAYER",
+        "NICKNAME",
+        "PLAYER_SLUG",
+        "NUM",
+        "POSITION",
+        "HEIGHT",
+        "WEIGHT",
+        "BIRTH_DATE",
+        "AGE",
+        "EXP",
+        "SCHOOL",
+        "PLAYER_ID",
+        "HOW_ACQUIRED",
+        "SUPPLEMENTAL_STATUS"
+      ],
+      "rowSet": [
+        [
+          1610612759,
+          "1997",
+          "00",
+          "Jaren Jackson",
+          "Jaren",
+          "jaren-jackson",
+          "2",
+          "G",
+          "6-6",
+          "215",
+          "OCT 27, 1967",
+          30,
+          "7",
+          "Georgetown",
+          1114,
+          null,
+          0
+        ],
+        [
+          1610612759,
+          "1997",
+          "00",
+          "Monty Williams",
+          "Monty",
+          "monty-williams",
+          "3",
+          "G-F",
+          "6-8",
+          "225",
+          "OCT 08, 1971",
+          26,
+          "3",
+          "Notre Dame",
+          42,
+          null,
+          0
+        ],
+        [
+          1610612759,
+          "1997",
+          "00",
+          "Reggie Geary",
+          "Reggie",
+          "reggie-geary",
+          "4",
+          "G",
+          "6-2",
+          "187",
+          "AUG 31, 1973",
+          24,
+          "R",
+          "Arizona",
+          1002,
+          null,
+          0
+        ],
+        [
+          1610612759,
+          "1997",
+          "00",
+          "Tim Duncan",
+          "Tim",
+          "tim-duncan",
+          "21",
+          "F-C",
+          "7-0",
+          "248",
+          "APR 25, 1976",
+          22,
+          "R",
+          "Wake Forest",
+          1495,
+          null,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "Coaches",
+      "headers": [
+        "TEAM_ID",
+        "SEASON",
+        "COACH_ID",
+        "FIRST_NAME",
+        "LAST_NAME",
+        "COACH_NAME",
+        "IS_ASSISTANT",
+        "COACH_TYPE",
+        "SORT_SEQUENCE",
+        "SUB_SORT_SEQUENCE"
+      ],
+      "rowSet": [
+        [1610612759, "1997", 873, "Gregg", "Popovich", "Gregg Popovich", 1, "Head Coach", null, 1]
+      ]
+    }
+  ]
+}

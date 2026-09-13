@@ -1,0 +1,6 @@
+season,award,player,player_id,age,first,pts_won,pts_max,share,winner
+2025,nba mvp,Shai Gilgeous-Alexander,gilgesh01,26,71,913,1000,0.913,TRUE
+2025,nba mvp,Nikola Jokić,jokicni01,29,29,787,1000,0.787,FALSE
+2025,nba mvp,Giannis Antetokounmpo,antetgi01,30,0,470,1000,0.47,FALSE
+1998,nba mvp,Michael Jordan,jordami01,34,92,1084,1160,0.934,TRUE
+1976,aba mvp,Julius Erving,ervinju01,25,32,32,35,0.914,TRUE

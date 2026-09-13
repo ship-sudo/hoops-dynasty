@@ -1,0 +1,5 @@
+season,lg,team,abbreviation,playoffs,g,mp,opp_fg,opp_fga,opp_fg_percent,opp_x3p,opp_x3pa,opp_x3p_percent,opp_x2p,opp_x2pa,opp_x2p_percent,opp_ft,opp_fta,opp_ft_percent,opp_orb,opp_drb,opp_trb,opp_ast,opp_stl,opp_blk,opp_tov,opp_pf,opp_pts
+2026,NBA,Atlanta Hawks,ATL,FALSE,82,19755,3473,7334,0.474,1056,2973,0.355,2417,4361,0.554,1514,1906,0.794,914,2796,3710,2185,695,402,1317,1515,9516
+2026,NBA,League Average,NA,FALSE,82,19783,3441,7305,0.471,1091,3032,0.36,2350,4273,0.55,1507,1926,0.783,933,2656,3589,2193,690,397,1190,1629,9480
+1998,NBA,Charlotte Hornets,CHH,TRUE,82,19780,2977,6417,0.464,369,1063,0.347,2608,5354,0.487,1436,1964,0.731,965,2259,3224,1806,582,372,1240,1902,7759
+1976,ABA,Denver Nuggets,DNA,TRUE,84,20310,4027,8683,0.464,113,418,0.27,3914,8265,0.474,1567,2061,0.76,1662,2578,4240,2133,952,485,1763,2287,9734

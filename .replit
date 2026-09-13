@@ -1,0 +1,18 @@
+modules = ["nodejs-22"]
+
+run = "sh -c 'test -d node_modules || npm install; exec npm run dev -w apps/web -- --host 0.0.0.0 --port 5000'"
+hidden = [".config", "node_modules"]
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+run = ["sh", "-c", "npm run dev -w apps/web -- --host 0.0.0.0 --port 5000"]
+deploymentTarget = "gce"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[env]
+PORT = "5000"

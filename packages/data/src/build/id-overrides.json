@@ -1,0 +1,6 @@
+{
+  "_comment": "bref slug → stats.nba.com person id. Applied before name matching. stats.nba.com stores these three as 'Sun Sun', 'Ha Ha', 'Cui Cui'.",
+  "yuesu01": "201180",
+  "seungha01": "2775",
+  "cuiyo01": "1642385"
+}

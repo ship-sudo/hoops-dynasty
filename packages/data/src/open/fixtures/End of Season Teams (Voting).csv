@@ -1,0 +1,5 @@
+season,lg,type,number_tm,position,player,player_id,age,pts_won,pts_max,share,x1st_tm,x2nd_tm,x3rd_tm
+2025,nba,all_defense,ORV,F,OG Anunoby,anunoog01,27,49,200,0.245,NA,NA,NA
+2025,nba,all_nba,1T,F,Giannis Antetokounmpo,antetgi01,30,500,500,1,100,0,0
+2025,nba,all_nba,1T,G,Shai Gilgeous-Alexander,gilgesh01,26,500,500,1,100,0,0
+2025,nba,all_nba,1T,C,Nikola Jokić,jokicni01,29,500,500,1,100,0,0

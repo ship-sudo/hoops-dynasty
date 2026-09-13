@@ -1,0 +1,30 @@
+{
+  "name": "hoops-dynasty",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "node --import tsx --test \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome check .",
+    "pipeline": "tsx packages/data/src/cli.ts",
+    "calibrate": "tsx packages/calibrate/src/cli.ts",
+    "dynasty": "tsx packages/game/src/cli.ts",
+    "dev": "npm run dev -w apps/web",
+    "ratings:anchors": "tsx packages/ratings/src/build-anchors.ts",
+    "progression:curves": "tsx packages/progression/src/fit-curves.ts",
+    "build": "npm run build -w apps/web"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

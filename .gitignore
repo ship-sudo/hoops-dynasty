@@ -1,0 +1,9 @@
+node_modules/
+dist/
+# Pipeline cache — not needed to play. Bundles *are* tracked so Replit/GitHub clones can boot.
+data/raw/
+data/db.sqlite
+data/db.sqlite-*
+*.log
+.DS_Store
+.claude/worktrees/
